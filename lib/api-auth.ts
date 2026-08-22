@@ -9,6 +9,7 @@ export async function getSessionUser(): Promise<AppUser | null> {
     return await getCurrentUser()
   } catch (error) {
     if (error instanceof UnauthorizedSignupError) return null
+    console.error("[getSessionUser] Unexpected auth error:", error)
     throw error
   }
 }
