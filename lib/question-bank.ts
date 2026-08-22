@@ -33,6 +33,8 @@ export type Question = {
   options: string[]
   answer: number
   explanation: string
+  /** Optional metadata for backend-generated vocabulary exercises. */
+  word?: string
 }
 
 const q = (id: string, difficulty: Difficulty, prompt: string, options: string[], answer: number, explanation: string): Question => ({ id, difficulty, prompt, options, answer, explanation })

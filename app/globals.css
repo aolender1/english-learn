@@ -72,6 +72,8 @@
   .answer-wrong .answer-key { @apply bg-destructive text-primary-foreground; }
   .modal-backdrop { @apply fixed inset-0 flex justify-end bg-foreground/25; }
   .modal-panel { @apply flex h-full w-full max-w-lg flex-col gap-7 overflow-y-auto bg-card p-6 text-card-foreground shadow-2xl md:p-9; animation: slide-in 180ms ease-out; }
+  .input-field { @apply w-full min-h-11 border border-border bg-card px-3 py-2 text-sm shadow-sm transition-colors placeholder:text-muted-foreground/50 focus-visible:outline-2 focus-visible:outline-offset-2; }
+  .link { @apply font-medium text-primary underline-offset-4 hover:underline; }
 }
 
 @keyframes slide-in { from { transform: translateX(24px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }

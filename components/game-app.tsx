@@ -2,13 +2,17 @@
 
 import { useEffect, useState } from "react"
 import confetti from "canvas-confetti"
-import { ArrowLeft, ArrowRight, BarChart3, BookOpen, Check, Home, Lock, Menu, RotateCcw, Trophy, X } from "lucide-react"
+import { ArrowLeft, ArrowRight, BarChart3, BookOpen, Check, Home, Lock, LogOut, Menu, RotateCcw, ShieldCheck, Trophy, X } from "lucide-react"
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet"
+import { authClient } from "@/lib/auth/client"
 import { cefrLevels, hasTopics, levelLabel, questionsForLevel, topic, type CefrLevel, type LevelBand, type Question } from "@/lib/question-bank"
 import { accuracy, clearActiveSession, initialProgress, loadActiveSession, loadProgress, recordGame, resetProgress, saveActiveSession, type Progress } from "@/lib/progress"
 
 type View = "home" | "level" | "quiz" | "results"
 type AnswerRecord = { question: Question; selected: number; correct: boolean }
+type SessionUser = { id: string; email: string; name: string | null; role: "teacher" | "student" }
+
+const ROUND_KEY = "wordshift-active-round-id"
 
 function shuffle<T>(items: T[]) {
   const next = [...items]
@@ -46,6 +50,10 @@ export function GameApp() {
   const [progress, setProgress] = useState<Progress>(initialProgress)
   const [statsOpen, setStatsOpen] = useState(false)
   const [confirmReset, setConfirmReset] = useState(false)
+  const [user, setUser] = useState<SessionUser | null>(null)
+  const [userLoaded, setUserLoaded] = useState(false)
+  const [roundId, setRoundId] = useState<string | null>(null)
+  const [starting, setStarting] = useState(false)
 
   useEffect(() => {
     setProgress(loadProgress())
@@ -58,6 +66,18 @@ export function GameApp() {
       setAnswers(saved.answers)
       setView("quiz")
     }
+    try {
+      const storedRound = window.sessionStorage.getItem(ROUND_KEY)
+      if (storedRound && saved) setRoundId(storedRound)
+      else if (storedRound) window.sessionStorage.removeItem(ROUND_KEY)
+    } catch { /* ignore */ }
+    fetch("/api/me")
+      .then((response) => (response.ok ? response.json() : { user: null }))
+      .then((data: { user: SessionUser | null }) => {
+        if (data.user?.id) setUser(data.user)
+      })
+      .catch(() => {})
+      .finally(() => setUserLoaded(true))
   }, [])
 
   const current = session[index]
@@ -78,23 +98,75 @@ export function GameApp() {
     setStatsOpen(true)
   }
 
-  function start(levelId: CefrLevel) {
-    const questions = shuffle(questionsForLevel(levelId)).slice(0, 10).map(prepare)
-    setLevel(levelId)
-    setSession(questions)
-    setIndex(0)
-    setSelected(null)
-    setAnswers([])
-    saveActiveSession({ level: levelId, topicId: topic.id, questions, index: 0, selected: null, answers: [] })
-    setView("quiz")
+  async function start(levelId: CefrLevel) {
+    setStarting(true)
+    try {
+      if (user && hasTopics(levelId)) {
+        try {
+          const response = await fetch("/api/practice/session", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ level: levelId, topicSlug: topic.id }),
+          })
+          if (response.ok) {
+            const data: { roundId?: string; exercises?: Question[] } = await response.json()
+            if (data.exercises?.length) {
+              const questions = shuffle(data.exercises).map(prepare)
+              setLevel(levelId)
+              setSession(questions)
+              setIndex(0)
+              setSelected(null)
+              setAnswers([])
+              setRoundId(data.roundId ?? null)
+              try {
+                if (data.roundId) window.sessionStorage.setItem(ROUND_KEY, data.roundId)
+                else window.sessionStorage.removeItem(ROUND_KEY)
+              } catch { /* ignore */ }
+              saveActiveSession({ level: levelId, topicId: topic.id, questions, index: 0, selected: null, answers: [] })
+              setView("quiz")
+              return
+            }
+          }
+        } catch {
+          // fall through to the static question bank
+        }
+      }
+
+      const questions = shuffle(questionsForLevel(levelId)).slice(0, 10).map(prepare)
+      setLevel(levelId)
+      setSession(questions)
+      setIndex(0)
+      setSelected(null)
+      setAnswers([])
+      setRoundId(null)
+      try { window.sessionStorage.removeItem(ROUND_KEY) } catch { /* ignore */ }
+      saveActiveSession({ level: levelId, topicId: topic.id, questions, index: 0, selected: null, answers: [] })
+      setView("quiz")
+    } finally {
+      setStarting(false)
+    }
   }
 
   function choose(option: number) {
     if (selected !== null || !current) return
-    const nextAnswers = [...answers, { question: current, selected: option, correct: option === current.answer }]
+    const correct = option === current.answer
+    const nextAnswers = [...answers, { question: current, selected: option, correct }]
     setSelected(option)
     setAnswers(nextAnswers)
     saveActiveSession({ level, topicId: topic.id, questions: session, index, selected: option, answers: nextAnswers })
+    if (roundId && current.word) {
+      void fetch("/api/practice/attempt", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          roundId,
+          exerciseId: current.id,
+          selectedAnswer: current.options[option],
+          correctAnswer: current.options[current.answer],
+          isCorrect: correct,
+        }),
+      }).catch(() => {})
+    }
   }
 
   function next() {
@@ -110,6 +182,15 @@ export function GameApp() {
     for (let i = answers.length - 1; i >= 0 && answers[i].correct; i--) trailingStreak++
     setProgress((value) => recordGame(value, level, finalScore, trailingStreak))
     clearActiveSession()
+    if (roundId) {
+      void fetch("/api/practice/complete", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ roundId, score: finalScore }),
+      }).catch(() => {})
+      try { window.sessionStorage.removeItem(ROUND_KEY) } catch { /* ignore */ }
+      setRoundId(null)
+    }
     if (finalScore === 10) {
       confetti({ particleCount: 120, spread: 75, origin: { y: 0.65 }, colors: ["#1f4d3e", "#d6a84b", "#f7f4ec"] })
       window.setTimeout(() => confetti({ particleCount: 70, spread: 100, origin: { y: 0.45 }, colors: ["#1f4d3e", "#d6a84b"] }), 250)
@@ -119,10 +200,17 @@ export function GameApp() {
 
   function goHome() {
     clearActiveSession()
+    try { window.sessionStorage.removeItem(ROUND_KEY) } catch { /* ignore */ }
+    setRoundId(null)
     setView("home")
     setSelected(null)
     setAnswers([])
     setMenuOpen(false)
+  }
+
+  async function signOut() {
+    try { await authClient.signOut() } catch { /* ignore */ }
+    window.location.assign("/")
   }
 
   return (
@@ -136,7 +224,20 @@ export function GameApp() {
               <span className="font-semibold tracking-tight">Wordshift</span>
             </button>
           </div>
-          <button className="button-ghost" onClick={openProgress}><BarChart3 size={17} aria-hidden="true" />Progress</button>
+          <div className="flex items-center gap-1">
+            <button className="button-ghost" onClick={openProgress}><BarChart3 size={17} aria-hidden="true" />Progress</button>
+            {user?.role === "teacher" && (
+              <a href="/teacher" className="button-ghost"><ShieldCheck size={17} aria-hidden="true" />Teacher</a>
+            )}
+            {user ? (
+              <>
+                <span className="tag max-w-44 truncate">{user.name || user.email}</span>
+                <button className="icon-button size-9" onClick={signOut} aria-label="Sign out"><LogOut size={15} aria-hidden="true" /></button>
+              </>
+            ) : userLoaded ? (
+              <a href="/auth/sign-in" className="button-primary ml-1 min-h-9 px-3.5 py-1.5">Sign in</a>
+            ) : null}
+          </div>
         </div>
       </header>
 
@@ -229,7 +330,9 @@ export function GameApp() {
                   <div className="flex flex-wrap items-center gap-3"><h3 className="text-2xl font-semibold tracking-tight">{topic.title}</h3><span className="tag">Best {progress.bestScores[level]}/10</span></div>
                   <p className="max-w-2xl text-sm leading-relaxed text-muted-foreground">{level === "b1-preliminary" ? "Backshift basics: tense changes, pronouns, time and place words, statements, negatives and simple questions." : "Advanced control: reporting verbs, gerunds and infinitives, and exceptions where tenses stay unchanged."}</p>
                 </div>
-                <button className="button-primary" onClick={() => start(level)}>Practice <ArrowRight aria-hidden="true" /></button>
+                <button className="button-primary" disabled={starting} onClick={() => start(level)}>
+                  {starting ? "Preparing…" : <>Practice <ArrowRight aria-hidden="true" /></>}
+                </button>
               </article>
             </section>
           ) : (
@@ -247,7 +350,7 @@ export function GameApp() {
 
       {view === "quiz" && current && (
         <div className="mx-auto flex max-w-5xl flex-col gap-8 px-5 py-8 md:px-8 md:py-12">
-          <div className="flex items-center justify-between gap-4"><button className="button-back" onClick={() => { clearActiveSession(); setView("level") }}><ArrowLeft aria-hidden="true" />Exit session</button><span className="tag">{levelLabel(level)} · {topic.title}</span></div>
+          <div className="flex items-center justify-between gap-4"><button className="button-back" onClick={() => { if (roundId) { void fetch("/api/practice/complete", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ roundId, score, abandoned: true }) }).catch(() => {}) } try { window.sessionStorage.removeItem(ROUND_KEY) } catch { /* ignore */ } setRoundId(null); clearActiveSession(); setView("level") }}><ArrowLeft aria-hidden="true" />Exit session</button><span className="tag">{levelLabel(level)} · {topic.title}</span></div>
           <div className="flex flex-col gap-3"><div className="flex justify-between font-mono text-xs uppercase tracking-widest text-muted-foreground"><span>Question {index + 1} of 10</span><span>{score} correct</span></div><div className="h-1 bg-secondary"><div className="h-full bg-primary transition-all" style={{ width: `${((index + 1) / 10) * 100}%` }} /></div></div>
           <section className="grid gap-8 md:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)] md:gap-12">
             <div className="flex flex-col gap-5 border-t border-border pt-6"><p className="eyebrow">Choose the best report</p><h1 className="text-pretty font-serif text-3xl leading-snug md:text-4xl">{current.prompt}</h1></div>
