@@ -1,0 +1,10 @@
+allowBuilds:
+  core-js: true
+  esbuild: true
+  msw: true
+  sharp: true
+onlyBuiltDependencies:
+  - core-js
+  - esbuild
+  - msw
+  - sharp
