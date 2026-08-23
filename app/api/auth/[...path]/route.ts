@@ -7,10 +7,11 @@ const neonHandlers = auth.handler()
 /**
  * Wraps the Neon Auth proxy handler with a same-origin CSRF guard.
  *
- * For legitimate same-origin requests we strip Origin/Referer before
- * forwarding, so Neon's managed Better Auth treats the call as
- * server-to-server and skips its own domain matching (which rejects
- * valid deployments even when their domains are configured).
+ * Cross-site requests are rejected here. For legitimate same-origin
+ * requests we override the forwarded Origin header with the Neon Auth
+ * base URL origin — better-auth always trusts its own base URL, which
+ * sidesteps its domain matching rejecting valid deployments even when
+ * their domains are configured in the console.
  */
 async function handle(request: Request, context: { params: Promise<{ path: string[] }> }): Promise<Response> {
   const origin = request.headers.get("origin")
@@ -27,8 +28,16 @@ async function handle(request: Request, context: { params: Promise<{ path: strin
   }
 
   const headers = new Headers(request.headers)
-  headers.delete("origin")
   headers.delete("referer")
+
+  const baseUrl = process.env.NEON_AUTH_BASE_URL
+  if (baseUrl) {
+    try {
+      headers.set("origin", new URL(baseUrl).origin)
+    } catch {
+      // keep the original origin if the base URL is malformed
+    }
+  }
 
   const body = request.method === "GET" || request.method === "HEAD" ? undefined : await request.arrayBuffer()
   const method = request.method as keyof typeof neonHandlers
