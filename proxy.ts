@@ -10,7 +10,41 @@ import { DEFAULT_AUTH_SKIP_ROUTES, processAuthMiddleware } from "@neondatabase/a
 const PUBLIC_ROUTES = ["/"]
 const LOGIN_URL = "/auth/sign-in"
 
+/**
+ * CSRF guard + origin scrubbing for the Neon Auth API proxy.
+ *
+ * Cross-site POSTs are rejected here (equivalent protection to the upstream
+ * origin check), and for same-origin requests we drop the Origin/Referer
+ * headers so Neon's managed Better Auth treats the call as server-to-server
+ * and skips its own domain matching, which rejects valid deployments whose
+ * domains are correctly configured.
+ */
+function handleAuthApi(request: NextRequest): NextResponse {
+  const origin = request.headers.get("origin")
+  if (!origin) return NextResponse.next()
+
+  let originHost: string | null = null
+  try {
+    originHost = new URL(origin).host
+  } catch {
+    originHost = null
+  }
+
+  if (!originHost || originHost !== request.headers.get("host")) {
+    return NextResponse.json({ message: "Invalid origin", code: "INVALID_ORIGIN" }, { status: 403 })
+  }
+
+  const headers = new Headers(request.headers)
+  headers.delete("origin")
+  headers.delete("referer")
+  return NextResponse.next({ request: { headers } })
+}
+
 export default async function proxy(request: NextRequest) {
+  if (request.nextUrl.pathname.startsWith("/api/auth")) {
+    return handleAuthApi(request)
+  }
+
   const baseUrl = process.env.NEON_AUTH_BASE_URL
   const cookieSecret = process.env.NEON_AUTH_COOKIE_SECRET
 
@@ -54,8 +88,8 @@ export default async function proxy(request: NextRequest) {
   }
 }
 
-// Only run where auth matters: the home page (OAuth verifier landing) and
-// the protected teacher panel. API routes enforce sessions individually.
+// Home page (OAuth verifier landing), the protected teacher panel, and the
+// auth API proxy. All other API routes enforce sessions individually.
 export const config = {
-  matcher: ["/", "/teacher", "/teacher/:path*"],
+  matcher: ["/", "/teacher", "/teacher/:path*", "/api/auth/:path*"],
 }
