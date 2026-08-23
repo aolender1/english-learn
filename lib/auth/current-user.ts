@@ -3,7 +3,20 @@ import { auth } from "@/lib/auth/server"
 import { db } from "@/lib/db"
 import { studentInvitations, teacherStudents, userProfiles } from "@/lib/db/schema"
 
-export const TEACHER_EMAILS = new Set(["albertolender@gmail.com", "marisol91088@gmail.com"])
+const DEFAULT_TEACHER_EMAILS = ["albertolender@gmail.com", "marisol91088@gmail.com"]
+
+/**
+ * Emails allowed to sign up as teachers. Configurable via the
+ * TEACHER_EMAILS env var (comma-separated) so new teachers can be added
+ * without a code change; falls back to the defaults above.
+ */
+export const TEACHER_EMAILS: ReadonlySet<string> = new Set(
+  (process.env.TEACHER_EMAILS ?? "")
+    .split(",")
+    .map((email) => email.trim().toLowerCase())
+    .filter(Boolean)
+    .concat(DEFAULT_TEACHER_EMAILS),
+)
 
 export type AppRole = "teacher" | "student"
 export type AppUser = {
