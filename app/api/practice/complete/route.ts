@@ -5,8 +5,8 @@ import { practiceRounds } from "@/lib/db/schema"
 import { getSessionUser, jsonError } from "@/lib/api-auth"
 
 export async function POST(request: Request) {
-  const user = await getSessionUser()
-  if (!user) return jsonError("Sign in required.", 401)
+  const user = await getSessionUser().catch(() => null)
+  if (!user) return Response.json({ ok: true, guest: true })
 
   let body: { roundId?: string; score?: number; abandoned?: boolean }
   try {

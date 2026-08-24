@@ -1,13 +1,14 @@
+import { and, eq } from "drizzle-orm"
+
 import { db } from "@/lib/db"
-import { practiceRounds } from "@/lib/db/schema"
+import { practiceRounds, topics as topicsTable } from "@/lib/db/schema"
 import { getSessionUser, jsonError } from "@/lib/api-auth"
 import { SESSION_SIZE, getOrCreateSessionQuestions } from "@/lib/practice-server"
-import { cefrLevels } from "@/lib/question-bank"
+import { cefrLevels, type CefrLevel } from "@/lib/question-bank"
 import { findTopic } from "@/lib/topics"
 
 export async function POST(request: Request) {
-  const user = await getSessionUser()
-  if (!user) return jsonError("Sign in to start a practice session.", 401)
+  const user = await getSessionUser().catch(() => null)
 
   let body: { level?: string; topicSlug?: string }
   try {
@@ -19,7 +20,24 @@ export async function POST(request: Request) {
   const level = cefrLevels.find((item) => item.id === body.level)?.id
   if (!level) return jsonError("Unknown CEFR level.", 400)
 
-  const topic = findTopic(body.topicSlug ?? "", level)
+  let topic = findTopic(body.topicSlug ?? "", level)
+  if (!topic) {
+    // Check DB for teacher-created topic
+    const [dbTopic] = await db
+      .select()
+      .from(topicsTable)
+      .where(and(eq(topicsTable.slug, body.topicSlug ?? ""), eq(topicsTable.level, level)))
+      .limit(1)
+    if (dbTopic) {
+      topic = {
+        slug: dbTopic.slug,
+        level: dbTopic.level as CefrLevel,
+        title: dbTopic.title,
+        description: dbTopic.description ?? "",
+        focus: dbTopic.focus ?? "",
+      }
+    }
+  }
   if (!topic) return jsonError(`No practice topic is available for ${level} yet.`, 404)
 
   try {
@@ -27,20 +45,27 @@ export async function POST(request: Request) {
     if (exercises.length === 0) {
       return jsonError("Could not prepare exercises for this topic. Try again.", 502)
     }
-    const [round] = await db
-      .insert(practiceRounds)
-      .values({
-        userId: user.id,
-        topicSlug: topic.slug,
-        level,
-        status: "active",
-        exerciseIds: exercises.map((exercise) => exercise.id),
-        total: exercises.length,
-      })
-      .returning()
+
+    let roundId: string | null = null
+
+    // Track round in DB if user is logged in
+    if (user?.id) {
+      const [round] = await db
+        .insert(practiceRounds)
+        .values({
+          userId: user.id,
+          topicSlug: topic.slug,
+          level,
+          status: "active",
+          exerciseIds: exercises.map((exercise) => exercise.id),
+          total: exercises.length,
+        })
+        .returning()
+      roundId = round.id
+    }
 
     return Response.json({
-      roundId: round.id,
+      roundId,
       exercises,
       requestedSize: SESSION_SIZE,
       topic: { slug: topic.slug, title: topic.title },

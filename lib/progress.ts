@@ -38,6 +38,7 @@ const emptyScores: Record<CefrLevel, number> = {
   "a2-flyers": 0,
   "a2-key": 0,
   "b1-preliminary": 0,
+  "b1-plus": 0,
   "b2-first": 0,
   "c1-advanced": 0,
   "c2-proficiency": 0,

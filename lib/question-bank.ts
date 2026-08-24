@@ -1,5 +1,14 @@
 export type Difficulty = "easy" | "medium" | "hard" | "master"
-export type CefrLevel = "pre-a1-starters" | "a1-movers" | "a2-flyers" | "a2-key" | "b1-preliminary" | "b2-first" | "c1-advanced" | "c2-proficiency"
+export type CefrLevel =
+  | "pre-a1-starters"
+  | "a1-movers"
+  | "a2-flyers"
+  | "a2-key"
+  | "b1-preliminary"
+  | "b1-plus"
+  | "b2-first"
+  | "c1-advanced"
+  | "c2-proficiency"
 
 export type LevelBand = "Young learners" | "Basic" | "Independent" | "Proficient"
 export type CefrLevelInfo = { id: CefrLevel; code: string; exam: string; band: LevelBand; description: string }
@@ -10,6 +19,7 @@ export const cefrLevels: CefrLevelInfo[] = [
   { id: "a2-flyers", code: "A2", exam: "Flyers", band: "Young learners", description: "Communicate in familiar situations with everyday words and phrases." },
   { id: "a2-key", code: "A2", exam: "Key", band: "Basic", description: "Use written and spoken English in simple, routine situations." },
   { id: "b1-preliminary", code: "B1", exam: "Preliminary", band: "Independent", description: "Handle everyday situations and express main ideas clearly." },
+  { id: "b1-plus", code: "B1+", exam: "Intermediate Plus", band: "Independent", description: "Bridge the gap to upper-intermediate with complex clauses and richer vocabulary." },
   { id: "b2-first", code: "B2", exam: "First", band: "Independent", description: "Communicate fluently and work with more complex language." },
   { id: "c1-advanced", code: "C1", exam: "Advanced", band: "Proficient", description: "Use English flexibly for academic and professional purposes." },
   { id: "c2-proficiency", code: "C2", exam: "Proficiency", band: "Proficient", description: "Understand and express virtually everything with precision." },
@@ -18,6 +28,81 @@ export const cefrLevels: CefrLevelInfo[] = [
 export function levelLabel(level: CefrLevel) {
   const item = cefrLevels.find((candidate) => candidate.id === level)
   return item ? `${item.code} ${item.exam}` : level
+}
+
+export function resolveLevelSlug(slug: string): CefrLevel | null {
+  const clean = slug.toLowerCase().trim().replace(/[^a-z0-9+-]/g, "")
+  switch (clean) {
+    case "pre-a1":
+    case "pre-a1-starters":
+    case "prea1":
+    case "starters":
+      return "pre-a1-starters"
+    case "a1":
+    case "a1-movers":
+    case "movers":
+      return "a1-movers"
+    case "a2-flyers":
+    case "flyers":
+      return "a2-flyers"
+    case "a2":
+    case "a2-key":
+    case "key":
+    case "ket":
+      return "a2-key"
+    case "b1":
+    case "b1-preliminary":
+    case "preliminary":
+    case "pet":
+      return "b1-preliminary"
+    case "b1-plus":
+    case "b1+":
+    case "b1plus":
+    case "b1-intermediate-plus":
+      return "b1-plus"
+    case "b2":
+    case "b2-first":
+    case "first":
+    case "fce":
+      return "b2-first"
+    case "c1":
+    case "c1-advanced":
+    case "advanced":
+    case "cae":
+      return "c1-advanced"
+    case "c2":
+    case "c2-proficiency":
+    case "proficiency":
+    case "cpe":
+      return "c2-proficiency"
+    default:
+      return cefrLevels.find((l) => l.id === clean)?.id ?? null
+  }
+}
+
+export function levelToSlug(level: CefrLevel): string {
+  switch (level) {
+    case "pre-a1-starters":
+      return "pre-a1"
+    case "a1-movers":
+      return "a1"
+    case "a2-flyers":
+      return "a2-flyers"
+    case "a2-key":
+      return "a2"
+    case "b1-preliminary":
+      return "b1"
+    case "b1-plus":
+      return "b1-plus"
+    case "b2-first":
+      return "b2"
+    case "c1-advanced":
+      return "c1"
+    case "c2-proficiency":
+      return "c2"
+    default:
+      return level
+  }
 }
 
 export const topic = {
@@ -111,5 +196,13 @@ export function questionsForLevel(level: CefrLevel) {
 }
 
 export function hasTopics(level: CefrLevel) {
-  return level === "b1-preliminary" || level === "b2-first"
+  return [
+    "pre-a1-starters",
+    "a1-movers",
+    "a2-flyers",
+    "a2-key",
+    "b1-preliminary",
+    "b1-plus",
+    "b2-first",
+  ].includes(level)
 }

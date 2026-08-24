@@ -3,8 +3,15 @@ import type { CefrLevel } from "./question-bank"
 export type VocabularyEntry = { english: string; spanish: string; sourceLevel: CefrLevel }
 
 const availableOrder: CefrLevel[] = [
-  "pre-a1-starters", "a1-movers", "a2-flyers", "a2-key",
-  "b1-preliminary", "b2-first", "c1-advanced", "c2-proficiency",
+  "pre-a1-starters",
+  "a1-movers",
+  "a2-flyers",
+  "a2-key",
+  "b1-preliminary",
+  "b1-plus",
+  "b2-first",
+  "c1-advanced",
+  "c2-proficiency",
 ]
 
 export function parseVocabularyCsv(input: string, sourceLevel: CefrLevel): VocabularyEntry[] {
@@ -39,12 +46,23 @@ export function parseVocabularyCsv(input: string, sourceLevel: CefrLevel): Vocab
 }
 
 export function cumulativeVocabulary(level: CefrLevel, lists: Partial<Record<CefrLevel, VocabularyEntry[]>>) {
+  // If b1-plus, it can draw from all levels up to b2-first as requested
+  if (level === "b1-plus") {
+    return [
+      ...(lists["pre-a1-starters"] ?? []),
+      ...(lists["a1-movers"] ?? []),
+      ...(lists["a2-flyers"] ?? []),
+      ...(lists["a2-key"] ?? []),
+      ...(lists["b1-preliminary"] ?? []),
+      ...(lists["b2-first"] ?? []),
+    ]
+  }
   const levelIndex = availableOrder.indexOf(level)
   if (levelIndex < 0) return []
   return availableOrder.slice(0, levelIndex + 1).flatMap((item) => lists[item] ?? [])
 }
 
-export const vocabularyFileNames: Record<CefrLevel, string> = {
+export const vocabularyFileNames: Partial<Record<CefrLevel, string>> = {
   "pre-a1-starters": "vocabulario_Starters_Pre_A1.csv",
   "a1-movers": "vocabulario_Movers_A1.csv",
   "a2-flyers": "vocabulario_Flyers_A2.csv",

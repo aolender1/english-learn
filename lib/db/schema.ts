@@ -37,14 +37,39 @@ export const studentInvitations = pgTable("student_invitations", {
 
 export const topics = pgTable("topics", {
   id: uuid("id").primaryKey().defaultRandom(),
-  slug: text("slug").notNull().unique(),
+  slug: text("slug").notNull(),
   level: text("level").notNull(),
   title: text("title").notNull(),
   description: text("description"),
+  focus: text("focus"),
   enabled: boolean("enabled").notNull().default(true),
   sortOrder: integer("sort_order").notNull().default(0),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-})
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  unique("topics_slug_level_key").on(table.slug, table.level),
+  index("idx_topics_level").on(table.level),
+])
+
+export const exercises = pgTable("exercises", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  topicSlug: text("topic_slug").notNull(),
+  level: text("level").notNull(),
+  prompt: text("prompt").notNull(),
+  options: jsonb("options").notNull(),
+  correctAnswerIndex: integer("correct_answer_index").notNull().default(0),
+  explanation: text("explanation").notNull(),
+  word: text("word"),
+  phonetic: text("phonetic"),
+  spanishTranslation: text("spanish_translation"),
+  difficulty: text("difficulty").notNull().default("medium"),
+  createdBy: text("created_by").notNull().default("system"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  index("idx_exercises_topic_level").on(table.topicSlug, table.level),
+  index("idx_exercises_word").on(table.word),
+])
 
 export const exerciseCache = pgTable("exercise_cache", {
   id: uuid("id").primaryKey().defaultRandom(),
