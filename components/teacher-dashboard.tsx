@@ -26,6 +26,7 @@ import {
   X,
 } from "lucide-react"
 import { cefrLevels, levelLabel, type CefrLevel } from "@/lib/question-bank"
+import { AudioWordBadge } from "@/components/audio-word-badge"
 
 type Tab = "tracking" | "topics" | "exercises" | "invitations"
 
@@ -1305,7 +1306,7 @@ export function TeacherDashboard({ teacherEmail }: { teacherEmail: string }) {
                         <span className="font-mono text-xs font-bold text-muted-foreground">
                           #{String(i + 1).padStart(2, "0")}
                         </span>
-                        {ex.word && <span className="tag text-[10px] font-mono">word: {ex.word}</span>}
+                        {ex.word && <AudioWordBadge word={ex.word} />}
                         <span className="tag text-[10px] uppercase font-mono">{ex.createdBy}</span>
                       </div>
                       <div className="flex items-center gap-1">

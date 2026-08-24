@@ -6,6 +6,7 @@ import {
   ArrowLeft,
   ArrowRight,
   BarChart3,
+  BookA,
   BookOpen,
   Check,
   Home,
@@ -17,6 +18,7 @@ import {
   ShieldCheck,
   Sparkles,
   Trophy,
+  Volume2,
   X,
 } from "lucide-react"
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet"
@@ -34,8 +36,11 @@ import {
   saveActiveSession,
   type Progress,
 } from "@/lib/progress"
+import { TopicTheory } from "@/components/topic-theory"
+import { AudioWordBadge } from "@/components/audio-word-badge"
+import { DictionaryDialog } from "@/components/dictionary-dialog"
 
-type View = "home" | "level" | "quiz" | "results"
+type View = "home" | "level" | "theory" | "quiz" | "results"
 type AnswerRecord = { question: Question; selected: number; correct: boolean }
 type SessionUser = { id: string; email: string; name: string | null; role: "teacher" | "student" }
 
@@ -100,15 +105,32 @@ export function GameApp({
   const [topicSearch, setTopicSearch] = useState("")
   const [loadingTopics, setLoadingTopics] = useState(false)
 
+  // Dictionary dialog state
+  const [dictOpen, setDictOpen] = useState(false)
+  const [dictQuery, setDictQuery] = useState("")
+
   useEffect(() => {
     setProgress(loadProgress())
+
+    // Handle Ctrl+K shortcut for dictionary
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault()
+        setDictOpen((prev) => !prev)
+      }
+    }
+    window.addEventListener("keydown", handleKeyDown)
 
     // If direct topic or level was specified via URL props:
     if (initialTopicSlug && initialLevel) {
       const matched = resolveTopicSlug(initialTopicSlug, initialLevel)
       if (matched) {
         setCurrentTopic(matched)
-        void start(initialLevel, matched, false)
+        if (initialView === "quiz") {
+          void start(initialLevel, matched, false)
+        } else {
+          setView("theory")
+        }
       } else {
         void fetchLevelTopics(initialLevel)
         setView("level")
@@ -143,7 +165,11 @@ export function GameApp({
       })
       .catch(() => {})
       .finally(() => setUserLoaded(true))
-  }, [initialLevel, initialTopicSlug])
+
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown)
+    }
+  }, [initialLevel, initialTopicSlug, initialView])
 
   const current = session[index]
   const score = answers.filter((answer) => answer.correct).length
@@ -181,6 +207,14 @@ export function GameApp({
     }
   }
 
+  function openTopicTheory(topic: TopicDef, updateUrl = true) {
+    setCurrentTopic(topic)
+    setView("theory")
+    if (updateUrl && typeof window !== "undefined") {
+      window.history.pushState(null, "", `/${levelToSlug(level)}/${topic.slug}`)
+    }
+  }
+
   function openProgress() {
     setMenuOpen(false)
     setStatsOpen(true)
@@ -188,7 +222,7 @@ export function GameApp({
 
   async function start(levelId: CefrLevel, chosenTopic?: TopicDef, updateUrl = true) {
     setStarting(true)
-    const activeTopic = chosenTopic || levelTopics[0] || topicCatalog.find((t) => t.level === levelId) || {
+    const activeTopic = chosenTopic || currentTopic || levelTopics[0] || topicCatalog.find((t) => t.level === levelId) || {
       slug: "general-practice",
       level: levelId,
       title: "General Practice",
@@ -389,7 +423,7 @@ export function GameApp({
   return (
     <main className="min-h-screen">
       <header className="border-b border-border sticky top-0 z-40 bg-background/95 backdrop-blur">
-        <div className="mx-auto flex min-h-16 max-w-6xl items-center justify-between px-5 md:px-8">
+        <div className="mx-auto flex min-h-16 max-w-6xl items-center justify-between px-5 md:px-8 gap-4">
           <div className="flex items-center gap-2">
             <button className="icon-button border-0" onClick={() => setMenuOpen(true)} aria-label="Open navigation menu">
               <Menu aria-hidden="true" />
@@ -401,7 +435,32 @@ export function GameApp({
               <span className="font-semibold tracking-tight">Wordshift</span>
             </button>
           </div>
+
+          {/* Dictionary Search Trigger */}
+          <div className="flex-1 max-w-md hidden sm:flex justify-center">
+            <button
+              onClick={() => setDictOpen(true)}
+              className="flex items-center justify-between w-full max-w-xs px-3 py-1.5 rounded-full border border-border bg-secondary/60 hover:bg-secondary text-xs text-muted-foreground transition-all group"
+            >
+              <div className="flex items-center gap-2">
+                <BookA size={14} className="text-primary group-hover:scale-110 transition-transform" />
+                <span>Dictionary & Pronunciation</span>
+              </div>
+              <kbd className="font-mono text-[10px] bg-background px-1.5 py-0.5 rounded border border-border/80 text-muted-foreground">
+                Ctrl+K
+              </kbd>
+            </button>
+          </div>
+
           <div className="flex items-center gap-2">
+            <button
+              className="sm:hidden icon-button size-9"
+              onClick={() => setDictOpen(true)}
+              title="Dictionary search"
+              aria-label="Open dictionary search"
+            >
+              <BookA size={17} />
+            </button>
             <button className="button-ghost" onClick={openProgress}>
               <BarChart3 size={17} aria-hidden="true" />
               Progress
@@ -428,6 +487,13 @@ export function GameApp({
         </div>
       </header>
 
+      {/* Dictionary Modal Dialog */}
+      <DictionaryDialog
+        isOpen={dictOpen}
+        onClose={() => setDictOpen(false)}
+        initialQuery={dictQuery}
+      />
+
       <Sheet open={menuOpen} onOpenChange={setMenuOpen}>
         <SheetContent side="left" className="w-[min(22rem,88vw)] gap-0 p-0">
           <SheetHeader className="border-b border-border px-6 py-6 text-left">
@@ -447,6 +513,16 @@ export function GameApp({
             >
               <Home aria-hidden="true" />
               <span>Home</span>
+            </button>
+            <button
+              className="flex min-h-12 w-full items-center gap-3 px-3 py-2 text-left text-sm text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+              onClick={() => {
+                setMenuOpen(false)
+                setDictOpen(true)
+              }}
+            >
+              <BookA aria-hidden="true" className="text-primary" />
+              <span>Dictionary & Audio</span>
             </button>
             <div className="my-4 border-t border-border" />
             <p className="px-3 pb-2 font-mono text-[11px] uppercase tracking-widest text-muted-foreground">Cambridge levels</p>
@@ -492,7 +568,7 @@ export function GameApp({
                 Master English.<br />Topic by topic.
               </h1>
               <p className="max-w-xl text-pretty text-base leading-relaxed text-muted-foreground md:text-lg">
-                Explore 184 grammar topics and 3,680+ curated exercises strictly constrained by Cambridge CEFR vocabulary lists.
+                Explore grammar & phonetics topics with clear explanations, native audio pronunciation, and interactive exercises.
               </p>
             </div>
             <div className="grid grid-cols-3 gap-5 border-t border-border pt-5 md:border-l md:border-t-0 md:pl-8 md:pt-0">
@@ -525,7 +601,7 @@ export function GameApp({
                         <button
                           key={item.id}
                           onClick={() => openLevel(item.id)}
-                          className="level-card group text-left"
+                          className="level-card group text-left cursor-pointer"
                           aria-label={`Open ${item.code} ${item.exam}`}
                         >
                           <div className="flex items-center justify-between gap-4">
@@ -555,7 +631,7 @@ export function GameApp({
           </section>
 
           <footer className="flex flex-col justify-between gap-3 border-t border-border pt-5 text-sm text-muted-foreground md:flex-row">
-            <p>184 topics · 3,680+ exercises · Powered by Cambridge CEFR vocabulary</p>
+            <p>Integrated with Oxford/Cambridge Dictionary API & Native Audio</p>
             <p>Progress saved automatically in Neon DB and local device.</p>
           </footer>
         </div>
@@ -607,41 +683,61 @@ export function GameApp({
               </div>
             ) : (
               <div className="grid gap-4 md:grid-cols-2">
-                {filteredTopics.map((item, idx) => (
-                  <article
-                    key={item.slug}
-                    className="group flex flex-col justify-between gap-4 border border-border bg-card p-6 transition-all hover:border-primary hover:shadow-sm"
-                  >
-                    <div className="flex items-start gap-4">
-                      <span className="flex size-10 shrink-0 items-center justify-center border border-border bg-secondary font-mono text-xs font-bold text-muted-foreground">
-                        {String(idx + 1).padStart(2, "0")}
-                      </span>
-                      <div className="flex flex-col gap-1.5">
-                        <h3 className="text-lg font-semibold tracking-tight text-foreground group-hover:text-primary transition-colors">
-                          {item.title}
-                        </h3>
-                        <p className="text-sm leading-relaxed text-muted-foreground line-clamp-2">
-                          {item.description || item.focus}
-                        </p>
+                {filteredTopics.map((item, idx) => {
+                  const isPhonetics = item.slug.includes("phonetics")
+                  return (
+                    <article
+                      key={item.slug}
+                      onClick={() => openTopicTheory(item)}
+                      className={`group flex flex-col justify-between gap-4 border bg-card p-6 transition-all hover:border-primary hover:shadow-md cursor-pointer rounded-md ${
+                        isPhonetics ? "border-primary/50 bg-primary/5" : "border-border"
+                      }`}
+                    >
+                      <div className="flex items-start gap-4">
+                        <span className="flex size-10 shrink-0 items-center justify-center border border-border bg-secondary font-mono text-xs font-bold text-muted-foreground group-hover:text-primary group-hover:border-primary transition-colors">
+                          {isPhonetics ? <Volume2 size={16} /> : String(idx + 1).padStart(2, "0")}
+                        </span>
+                        <div className="flex flex-col gap-1.5">
+                          <div className="flex items-center gap-2">
+                            <h3 className="text-lg font-semibold tracking-tight text-foreground group-hover:text-primary transition-colors">
+                              {item.title}
+                            </h3>
+                          </div>
+                          <p className="text-sm leading-relaxed text-muted-foreground line-clamp-2">
+                            {item.description || item.focus}
+                          </p>
+                        </div>
                       </div>
-                    </div>
 
-                    <div className="mt-2 flex items-center justify-between border-t border-border/60 pt-4">
-                      <span className="tag text-xs">20 bank questions</span>
-                      <button
-                        className="button-primary py-1.5 px-4 text-xs font-semibold"
-                        disabled={starting}
-                        onClick={() => start(level, item)}
-                      >
-                        {starting ? "Preparing…" : <>Practice <ArrowRight size={14} aria-hidden="true" /></>}
-                      </button>
-                    </div>
-                  </article>
-                ))}
+                      <div className="mt-2 flex items-center justify-between border-t border-border/60 pt-4">
+                        <span className="tag text-xs">Ver teoría y práctica</span>
+                        <span className="button-primary py-1 px-3 text-xs font-semibold flex items-center gap-1 group-hover:bg-primary/90">
+                          Acceder <ArrowRight size={13} />
+                        </span>
+                      </div>
+                    </article>
+                  )
+                })}
               </div>
             )}
           </section>
         </div>
+      )}
+
+      {/* TOPIC THEORY & EXPLANATION SCREEN */}
+      {view === "theory" && currentTopic && (
+        <TopicTheory
+          level={level}
+          topic={currentTopic}
+          onStartPractice={() => void start(level, currentTopic)}
+          onBack={() => {
+            setView("level")
+            if (typeof window !== "undefined") {
+              window.history.pushState(null, "", `/${levelToSlug(level)}`)
+            }
+          }}
+          starting={starting}
+        />
       )}
 
       {view === "quiz" && current && (
@@ -664,7 +760,7 @@ export function GameApp({
                 }
                 setRoundId(null)
                 clearActiveSession()
-                setView("level")
+                setView("theory")
               }}
             >
               <ArrowLeft aria-hidden="true" />
@@ -696,8 +792,9 @@ export function GameApp({
                 {current.prompt}
               </h1>
               {current.word && (
-                <div className="mt-2 text-xs font-mono text-muted-foreground">
-                  Target word: <strong>{current.word}</strong>
+                <div className="mt-2 flex items-center gap-2">
+                  <span className="text-xs text-muted-foreground font-mono">Word Audio:</span>
+                  <AudioWordBadge word={current.word} />
                 </div>
               )}
             </div>
@@ -741,6 +838,12 @@ export function GameApp({
                     <p className="mt-1 text-sm leading-relaxed text-foreground whitespace-pre-line">
                       {current.explanation}
                     </p>
+                    {current.word && (
+                      <div className="mt-3 pt-3 border-t border-border/60 flex items-center gap-2">
+                        <span className="text-xs text-muted-foreground">Pronunciation:</span>
+                        <AudioWordBadge word={current.word} />
+                      </div>
+                    )}
                   </div>
                   <button className="button-primary self-start mt-1" onClick={next}>
                     {index === session.length - 1 ? "See results" : "Next question"}
@@ -796,6 +899,11 @@ export function GameApp({
                         <strong>Correct:</strong> {item.question.options[item.question.answer]}
                       </p>
                       <p className="text-xs text-muted-foreground mt-1 whitespace-pre-line">{item.question.explanation}</p>
+                      {item.question.word && (
+                        <div className="mt-2">
+                          <AudioWordBadge word={item.question.word} />
+                        </div>
+                      )}
                     </div>
                   </div>
                 ))}
@@ -806,6 +914,9 @@ export function GameApp({
             <button className="button-primary" onClick={() => start(level, currentTopic ?? undefined)}>
               <RotateCcw aria-hidden="true" />
               Try this topic again
+            </button>
+            <button className="button-secondary" onClick={() => setView("theory")}>
+              Review {currentTopic?.title} Theory
             </button>
             <button className="button-secondary" onClick={() => setView("level")}>
               Back to {levelLabel(level)} topics

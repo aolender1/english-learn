@@ -39,7 +39,7 @@ export default async function TopicPage(props: Props) {
     <GameApp
       initialLevel={level}
       initialTopicSlug={topic ? topic.slug : topicParam}
-      initialView="quiz"
+      initialView="theory"
     />
   )
 }

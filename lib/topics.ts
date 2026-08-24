@@ -1325,6 +1325,58 @@ export const topicCatalog: TopicDef[] = [
     description: "Focusing information with It-clefts ('It was John who called') and Wh-clefts ('What I need is a holiday').",
     focus: "It-clefts (It is/was X that/who...) and pseudo-clefts (What I really want is...) for emphasis.",
   },
+  // ==========================================
+  // Phonetics & Pronunciation Topics per Level
+  // ==========================================
+  {
+    slug: "phonetics-pronunciation-starters",
+    level: "pre-a1-starters",
+    title: "Pronunciation & Phonetics: Letters, Vowels & Basic Sounds",
+    description: "Discover the sounds of English letters, basic vowels, and clear word pronunciation with audio.",
+    focus: "Phonetics of single vowel sounds (/æ/, /e/, /ɪ/, /ɒ/, /ʌ/) and basic consonant articulation.",
+  },
+  {
+    slug: "phonetics-pronunciation-movers",
+    level: "a1-movers",
+    title: "Pronunciation & Phonetics: Short vs Long Vowels & Plural -s",
+    description: "Master the difference between short and long vowel sounds (/ɪ/ vs /iː/) and -s endings (/s/, /z/, /ɪz/).",
+    focus: "Distinguishing short and long vowel pairs and correct plural/third-person -s endings.",
+  },
+  {
+    slug: "phonetics-pronunciation-flyers",
+    level: "a2-flyers",
+    title: "Pronunciation & Phonetics: Past -ed Endings & Silent Letters",
+    description: "Practise pronouncing regular past tense -ed endings (/t/, /d/, /ɪd/) and common silent letters.",
+    focus: "Pronunciation rules for regular past verbs (-ed) and silent consonants in English words.",
+  },
+  {
+    slug: "phonetics-pronunciation-key",
+    level: "a2-key",
+    title: "Pronunciation & Phonetics: Syllable Stress & Common Diphthongs",
+    description: "Understand primary syllable stress (ˈ) and gliding diphthong sounds (/eɪ/, /aɪ/, /əʊ/, /aʊ/).",
+    focus: "Syllable stress patterns in compound and multi-syllable everyday vocabulary.",
+  },
+  {
+    slug: "phonetics-pronunciation-preliminary",
+    level: "b1-preliminary",
+    title: "Pronunciation & Phonetics: The Schwa (/ə/) & Connected Speech",
+    description: "Master the most common English sound—the schwa /ə/—and weak forms of auxiliary verbs.",
+    focus: "Unstressed syllables, the schwa /ə/, and natural rhythm in connected speech.",
+  },
+  {
+    slug: "phonetics-pronunciation-b1-plus",
+    level: "b1-plus",
+    title: "Pronunciation & Phonetics: Sentence Stress & Intonation Patterns",
+    description: "Explore expressive intonation (rising vs falling tones) and contrastive sentence stress.",
+    focus: "Intonation patterns for questions, statements, attitude, and contrastive sentence stress.",
+  },
+  {
+    slug: "phonetics-pronunciation-first",
+    level: "b2-first",
+    title: "Pronunciation & Phonetics: Advanced Linking, Elision & Assimilation",
+    description: "Refine natural English fluency with consonant-to-vowel linking, elision, and sound assimilation.",
+    focus: "Advanced connected speech features: catenation (linking /r/, /j/, /w/), elision, and assimilation.",
+  },
 ]
 
 export function topicsForLevel(level: CefrLevel): TopicDef[] {
