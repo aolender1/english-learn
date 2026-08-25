@@ -5,9 +5,9 @@ import { and, eq } from "drizzle-orm"
 import { db } from "@/lib/db"
 import { exercises, topics as topicsTable } from "@/lib/db/schema"
 import { getSessionUser, jsonError } from "@/lib/api-auth"
-import { cefrLevels, type CefrLevel, type Difficulty } from "@/lib/question-bank"
+import { cefrLevels, type CefrLevel } from "@/lib/question-bank"
 import { findTopic } from "@/lib/topics"
-import { generateExercises } from "@/lib/gemini"
+import { generateTopicExercises } from "@/lib/gemini"
 import { cumulativeVocabulary, parseVocabularyCsv, vocabularyFileNames, type VocabularyEntry } from "@/lib/vocabulary"
 import { difficultyForLevel } from "@/lib/practice-server"
 
@@ -81,18 +81,15 @@ export async function POST(request: Request) {
 
   try {
     const vocabList = cumulativeVocabulary(level, getLoadedVocab())
-    if (vocabList.length === 0) {
-      return jsonError(`No vocabulary available for level ${level}.`, 400)
-    }
-
-    const pickedWords = shuffle(vocabList).slice(0, count)
+    const pickedWords = shuffle(vocabList).slice(0, 20)
     const levelCode = cefrLevels.find((item) => item.id === level)?.code ?? level
 
-    const generated = await generateExercises(
-      pickedWords.map((w) => ({ english: w.english, spanish: w.spanish })),
+    const generated = await generateTopicExercises(
+      count,
       level,
       levelCode,
-      topic
+      topic,
+      pickedWords.map((w) => ({ english: w.english, spanish: w.spanish }))
     )
 
     if (generated.length === 0) {
@@ -100,23 +97,17 @@ export async function POST(request: Request) {
     }
 
     const newExercises = generated.map((item) => {
-      const options = item.exercise.options.map(String)
-      let ansIdx = options.findIndex((opt) => opt === item.exercise.answer)
-      if (ansIdx < 0) ansIdx = 0
-      const summary = [item.word, item.phonetic ?? "", `— ${item.spanish_translation ?? ""}`].join(" ").trim()
-      const explanation = item.example_sentence ? `${summary}\nExample: “${item.example_sentence}”` : summary
-
       return {
         topicSlug: topic.slug,
         level,
-        prompt: item.exercise.question,
-        options,
-        correctAnswerIndex: ansIdx,
-        explanation,
+        prompt: item.prompt,
+        options: item.options,
+        correctAnswerIndex: item.correct_answer_index,
+        explanation: item.explanation,
         word: item.word,
         phonetic: item.phonetic,
         spanishTranslation: item.spanish_translation,
-        difficulty: difficultyForLevel(level),
+        difficulty: item.difficulty || difficultyForLevel(level),
         createdBy: "ai",
       }
     })

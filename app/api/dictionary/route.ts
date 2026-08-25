@@ -70,8 +70,8 @@ export async function GET(request: Request) {
 
     serverCache.set(word, result)
     return Response.json(result)
-  } catch (error) {
-    console.warn(`[api/dictionary] Upstream fetch error for "${word}":`, error)
-    return Response.json({ error: "Failed to fetch dictionary data" }, { status: 502 })
+  } catch {
+    serverCache.set(word, null)
+    return Response.json({ error: "Dictionary lookup unavailable" }, { status: 404 })
   }
 }

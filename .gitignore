@@ -14,3 +14,9 @@ node_modules
 .next/
 .DS_Store
 *.tsbuildinfo
+
+# Temporary generation scratch & test scripts
+data/batches/
+scripts/test*
+scripts/scratch*
+*.log

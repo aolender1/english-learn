@@ -574,7 +574,7 @@ export function GameApp({
             <div className="grid grid-cols-3 gap-5 border-t border-border pt-5 md:border-l md:border-t-0 md:pl-8 md:pt-0">
               <Stat label="Sessions" value={`${progress.gamesPlayed}`} />
               <Stat label="Accuracy" value={`${accuracy(progress)}%`} />
-              <Stat label="Levels" value={`${mastered}/8`} />
+              <Stat label="Levels" value={`${mastered}/${cefrLevels.length}`} />
             </div>
           </section>
 
@@ -791,12 +791,6 @@ export function GameApp({
               <h1 className="text-pretty font-serif text-3xl leading-snug md:text-4xl">
                 {current.prompt}
               </h1>
-              {current.word && (
-                <div className="mt-2 flex items-center gap-2">
-                  <span className="text-xs text-muted-foreground font-mono">Word Audio:</span>
-                  <AudioWordBadge word={current.word} />
-                </div>
-              )}
             </div>
 
             <div className="flex flex-col gap-3" role="group" aria-label="Answer choices">
