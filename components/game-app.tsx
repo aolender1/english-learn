@@ -495,27 +495,27 @@ export function GameApp({
       />
 
       <Sheet open={menuOpen} onOpenChange={setMenuOpen}>
-        <SheetContent side="left" className="w-[min(22rem,88vw)] gap-0 p-0">
-          <SheetHeader className="border-b border-border px-6 py-6 text-left">
-            <SheetTitle className="flex items-center gap-3 text-lg">
+        <SheetContent side="left" className="w-[min(22rem,88vw)] gap-0 p-0 bg-card text-card-foreground shadow-2xl border-r border-border">
+          <SheetHeader className="border-b border-border bg-card px-6 py-6 text-left">
+            <SheetTitle className="flex items-center gap-3 text-lg font-serif">
               <span className="flex size-9 items-center justify-center bg-primary text-primary-foreground">
                 <BookOpen aria-hidden="true" />
               </span>
               Wordshift
             </SheetTitle>
-            <SheetDescription>Navigate the Cambridge English learning path.</SheetDescription>
+            <SheetDescription className="text-muted-foreground">Navigate the Cambridge English learning path.</SheetDescription>
           </SheetHeader>
-          <nav className="flex flex-1 flex-col overflow-y-auto px-3 py-4" aria-label="Main navigation">
-            <p className="px-3 pb-2 font-mono text-[11px] uppercase tracking-widest text-muted-foreground">Explore</p>
+          <nav className="flex flex-1 flex-col overflow-y-auto bg-card px-3 py-4" aria-label="Main navigation">
+            <p className="px-3 pb-2 font-mono text-[11px] uppercase tracking-widest text-primary/80 font-semibold">Explore</p>
             <button
-              className="flex min-h-12 w-full items-center gap-3 px-3 py-2 text-left text-sm text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+              className="flex min-h-12 w-full items-center gap-3 px-3 py-2 text-left text-sm font-medium text-foreground transition-colors hover:bg-secondary/80 rounded"
               onClick={goHome}
             >
-              <Home aria-hidden="true" />
+              <Home aria-hidden="true" className="text-muted-foreground" />
               <span>Home</span>
             </button>
             <button
-              className="flex min-h-12 w-full items-center gap-3 px-3 py-2 text-left text-sm text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+              className="flex min-h-12 w-full items-center gap-3 px-3 py-2 text-left text-sm font-medium text-foreground transition-colors hover:bg-secondary/80 rounded"
               onClick={() => {
                 setMenuOpen(false)
                 setDictOpen(true)
@@ -525,34 +525,41 @@ export function GameApp({
               <span>Dictionary & Audio</span>
             </button>
             <div className="my-4 border-t border-border" />
-            <p className="px-3 pb-2 font-mono text-[11px] uppercase tracking-widest text-muted-foreground">Cambridge levels</p>
+            <p className="px-3 pb-2 font-mono text-[11px] uppercase tracking-widest text-primary/80 font-semibold">Cambridge levels</p>
             {cefrLevels.map((item, position) => {
               const count = topicsForLevel(item.id).length
+              const isCurrent = view === "level" && level === item.id
               return (
                 <button
                   key={item.id}
-                  className="flex min-h-12 w-full items-center gap-3 px-3 py-2 text-left text-sm text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground aria-[current=page]:bg-secondary aria-[current=page]:text-foreground"
+                  className={`flex min-h-12 w-full items-center gap-3 px-3 py-2 text-left text-sm transition-colors rounded ${
+                    isCurrent
+                      ? "bg-secondary font-semibold text-primary border border-primary/20"
+                      : "text-foreground hover:bg-secondary/80 font-medium"
+                  }`}
                   onClick={() => openLevel(item.id)}
-                  aria-current={view === "level" && level === item.id ? "page" : undefined}
+                  aria-current={isCurrent ? "page" : undefined}
                 >
-                  <span className="flex size-8 shrink-0 items-center justify-center border border-border bg-secondary font-mono text-[10px] font-semibold">
+                  <span className={`flex size-8 shrink-0 items-center justify-center border font-mono text-[10px] font-semibold ${
+                    isCurrent ? "border-primary bg-primary text-primary-foreground" : "border-border bg-secondary text-foreground"
+                  }`}>
                     {item.code}
                   </span>
                   <span className="flex min-w-0 flex-1 flex-col text-left">
                     <strong className="truncate text-sm font-medium">{item.exam}</strong>
                     <span className="text-xs text-muted-foreground">{count > 0 ? `${count} topics` : `Stage ${position + 1}`}</span>
                   </span>
-                  {count > 0 && <span className="size-1.5 rounded-full bg-primary" aria-label="Topics available" />}
+                  {count > 0 && <span className="size-2 rounded-full bg-primary" aria-label="Topics available" />}
                 </button>
               )
             })}
             <div className="my-4 border-t border-border" />
-            <p className="px-3 pb-2 font-mono text-[11px] uppercase tracking-widest text-muted-foreground">Extras</p>
+            <p className="px-3 pb-2 font-mono text-[11px] uppercase tracking-widest text-primary/80 font-semibold">Extras</p>
             <button
-              className="flex min-h-12 w-full items-center gap-3 px-3 py-2 text-left text-sm text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+              className="flex min-h-12 w-full items-center gap-3 px-3 py-2 text-left text-sm font-medium text-foreground transition-colors hover:bg-secondary/80 rounded"
               onClick={openProgress}
             >
-              <BarChart3 aria-hidden="true" />
+              <BarChart3 aria-hidden="true" className="text-muted-foreground" />
               <span>Progress</span>
             </button>
           </nav>
