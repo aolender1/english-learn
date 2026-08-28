@@ -7,10 +7,13 @@ import {
   ArrowRight,
   BookOpen,
   Check,
+  CheckCircle2,
   ChevronRight,
   Edit2,
   Filter,
+  ImageIcon,
   Layers,
+  Lightbulb,
   ListOrdered,
   Mail,
   MoveRight,
@@ -23,10 +26,12 @@ import {
   UserCheck,
   UserRound,
   Users,
+  Volume2,
   X,
 } from "lucide-react"
 import { cefrLevels, levelLabel, type CefrLevel } from "@/lib/question-bank"
 import { AudioWordBadge } from "@/components/audio-word-badge"
+import { getDefaultTopicTheoryData, type TopicTheoryData } from "@/lib/topics"
 
 type Tab = "tracking" | "topics" | "exercises" | "invitations"
 
@@ -97,6 +102,7 @@ type TopicItem = {
   title: string
   description: string | null
   focus: string | null
+  theory?: TopicTheoryData | null
   enabled: boolean
   sortOrder: number
   exerciseCount: number
@@ -151,7 +157,7 @@ export function TeacherDashboard({ teacherEmail }: { teacherEmail: string }) {
   const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null)
   const [studentDetail, setStudentDetail] = useState<StudentDetail | null>(null)
   const [loadingStudentDetail, setLoadingStudentDetail] = useState(false)
-
+  
   // Topics tab state
   const [topics, setTopics] = useState<TopicItem[]>([])
   const [topicLevelFilter, setTopicLevelFilter] = useState<CefrLevel | "all">("all")
@@ -160,13 +166,132 @@ export function TeacherDashboard({ teacherEmail }: { teacherEmail: string }) {
   const [creatingTopic, setCreatingTopic] = useState(false)
   const [movingTopic, setMovingTopic] = useState<TopicItem | null>(null)
   const [moveTargetLevel, setMoveTargetLevel] = useState<CefrLevel>("a1-movers")
+  const [topicFormTab, setTopicFormTab] = useState<"general" | "theory">("general")
   const [topicForm, setTopicForm] = useState({
     title: "",
     slug: "",
     level: "pre-a1-starters" as CefrLevel,
     description: "",
     focus: "",
+    concept: "",
+    imageUrl: "",
+    imageCaption: "",
+    formula: [] as Array<{ label: string; text: string }>,
+    examples: [] as Array<{ en: string; es: string; tip?: string }>,
+    tips: [] as string[],
+    keyWords: "",
   })
+
+  // Theory Form Helpers
+  function addTopicFormula() {
+    setTopicForm((prev) => ({
+      ...prev,
+      formula: [...prev.formula, { label: "RULE", text: "" }],
+    }))
+  }
+  function updateTopicFormula(index: number, field: "label" | "text", val: string) {
+    setTopicForm((prev) => {
+      const updated = [...prev.formula]
+      updated[index] = { ...updated[index], [field]: val }
+      return { ...prev, formula: updated }
+    })
+  }
+  function removeTopicFormula(index: number) {
+    setTopicForm((prev) => ({
+      ...prev,
+      formula: prev.formula.filter((_, i) => i !== index),
+    }))
+  }
+
+  function addTopicExample() {
+    setTopicForm((prev) => ({
+      ...prev,
+      examples: [...prev.examples, { en: "", es: "", tip: "" }],
+    }))
+  }
+  function updateTopicExample(index: number, field: "en" | "es" | "tip", val: string) {
+    setTopicForm((prev) => {
+      const updated = [...prev.examples]
+      updated[index] = { ...updated[index], [field]: val }
+      return { ...prev, examples: updated }
+    })
+  }
+  function removeTopicExample(index: number) {
+    setTopicForm((prev) => ({
+      ...prev,
+      examples: prev.examples.filter((_, i) => i !== index),
+    }))
+  }
+
+  function addTopicTip() {
+    setTopicForm((prev) => ({
+      ...prev,
+      tips: [...prev.tips, ""],
+    }))
+  }
+  function updateTopicTip(index: number, val: string) {
+    setTopicForm((prev) => {
+      const updated = [...prev.tips]
+      updated[index] = val
+      return { ...prev, tips: updated }
+    })
+  }
+  function removeTopicTip(index: number) {
+    setTopicForm((prev) => ({
+      ...prev,
+      tips: prev.tips.filter((_, i) => i !== index),
+    }))
+  }
+
+  function openCreateTopic() {
+    const defaultLvl: CefrLevel = "pre-a1-starters"
+    setEditingTopic(null)
+    setTopicFormTab("general")
+    setTopicForm({
+      title: "",
+      slug: "",
+      level: defaultLvl,
+      description: "",
+      focus: "",
+      concept: "",
+      imageUrl: "",
+      imageCaption: "",
+      formula: [{ label: "AFIRMATIVO / AFFIRMATIVE", text: "" }],
+      examples: [{ en: "", es: "", tip: "" }],
+      tips: [""],
+      keyWords: "",
+    })
+    setCreatingTopic(true)
+  }
+
+  function openEditTopic(t: TopicItem) {
+    const topicDef: import("@/lib/topics").TopicDef = {
+      slug: t.slug,
+      level: t.level,
+      title: t.title,
+      description: t.description ?? "",
+      focus: t.focus ?? "",
+      theory: t.theory,
+      enabled: t.enabled,
+    }
+    const currentTheory = t.theory || getDefaultTopicTheoryData(topicDef, t.level)
+    setEditingTopic(t)
+    setTopicFormTab("general")
+    setTopicForm({
+      title: t.title,
+      slug: t.slug,
+      level: t.level,
+      description: t.description ?? "",
+      focus: t.focus ?? "",
+      concept: currentTheory.concept || "",
+      imageUrl: currentTheory.imageUrl || "",
+      imageCaption: currentTheory.imageCaption || "",
+      formula: currentTheory.formula ? [...currentTheory.formula] : [{ label: "AFIRMATIVO", text: "" }],
+      examples: currentTheory.examples ? [...currentTheory.examples] : [{ en: "", es: "", tip: "" }],
+      tips: currentTheory.tips ? [...currentTheory.tips] : [""],
+      keyWords: (currentTheory.keyWords || []).join(", "),
+    })
+  }
 
   // Exercises tab state
   const [exerciseLevel, setExerciseLevel] = useState<CefrLevel>("pre-a1-starters")
@@ -251,18 +376,12 @@ export function TeacherDashboard({ teacherEmail }: { teacherEmail: string }) {
   }, [])
 
   useEffect(() => {
-    const available = topics.filter((t) => t.level === exerciseLevel)
-    if (available.length > 0) {
-      const targetSlug = available.some((t) => t.slug === selectedTopicSlug)
-        ? selectedTopicSlug
-        : available[0].slug
-      setSelectedTopicSlug(targetSlug)
-      void fetchExercisesForTopic(targetSlug, exerciseLevel)
+    if (selectedTopicSlug) {
+      void fetchExercisesForTopic(selectedTopicSlug, exerciseLevel)
     } else {
-      setSelectedTopicSlug("")
       setExercisesList([])
     }
-  }, [exerciseLevel, topics, selectedTopicSlug, fetchExercisesForTopic])
+  }, [selectedTopicSlug, exerciseLevel, fetchExercisesForTopic])
 
   // Student details fetcher
   async function inspectStudent(studentId: string) {
@@ -328,6 +447,22 @@ export function TeacherDashboard({ teacherEmail }: { teacherEmail: string }) {
     e.preventDefault()
     setBusy(true)
     setMessage(null)
+
+    const cleanedKeywords = topicForm.keyWords
+      .split(",")
+      .map((w) => w.trim().toLowerCase())
+      .filter((w) => w.length > 0)
+
+    const theoryPayload: TopicTheoryData = {
+      concept: topicForm.concept.trim(),
+      imageUrl: topicForm.imageUrl.trim() || undefined,
+      imageCaption: topicForm.imageCaption.trim() || undefined,
+      formula: topicForm.formula.filter((f) => f.label.trim() && f.text.trim()),
+      examples: topicForm.examples.filter((e) => e.en.trim()),
+      tips: topicForm.tips.filter((t) => t.trim()),
+      keyWords: cleanedKeywords,
+    }
+
     try {
       if (editingTopic) {
         const res = await fetch("/api/teacher/topics", {
@@ -335,27 +470,38 @@ export function TeacherDashboard({ teacherEmail }: { teacherEmail: string }) {
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
             id: editingTopic.id,
-            title: topicForm.title,
-            description: topicForm.description,
-            focus: topicForm.focus,
+            slug: editingTopic.slug,
+            level: editingTopic.level,
+            title: topicForm.title.trim(),
+            description: topicForm.description.trim(),
+            focus: topicForm.focus.trim(),
+            newLevel: topicForm.level !== editingTopic.level ? topicForm.level : undefined,
+            theory: theoryPayload,
           }),
         })
         if (!res.ok) throw new Error("Failed to update topic")
-        setMessage({ text: "Topic updated successfully." })
+        setMessage({ text: "Tema y su teoría actualizados exitosamente." })
       } else {
         const res = await fetch("/api/teacher/topics", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify(topicForm),
+          body: JSON.stringify({
+            title: topicForm.title.trim(),
+            slug: topicForm.slug.trim(),
+            level: topicForm.level,
+            description: topicForm.description.trim(),
+            focus: topicForm.focus.trim(),
+            theory: theoryPayload,
+          }),
         })
         if (!res.ok) throw new Error("Failed to create topic")
-        setMessage({ text: "New topic created." })
+        setMessage({ text: "Nuevo tema creado exitosamente con su teoría." })
       }
       setEditingTopic(null)
       setCreatingTopic(false)
       await refreshTopics()
     } catch (err) {
-      setMessage({ text: err instanceof Error ? err.message : "Topic error", error: true })
+      setMessage({ text: err instanceof Error ? err.message : "Error al guardar el tema", error: true })
     } finally {
       setBusy(false)
     }
@@ -802,18 +948,8 @@ export function TeacherDashboard({ teacherEmail }: { teacherEmail: string }) {
               <p className="text-sm text-muted-foreground">Create, edit, delete, or move topics between CEFR levels.</p>
             </div>
             <button
-              onClick={() => {
-                setEditingTopic(null)
-                setTopicForm({
-                  title: "",
-                  slug: "",
-                  level: "pre-a1-starters",
-                  description: "",
-                  focus: "",
-                })
-                setCreatingTopic(true)
-              }}
-              className="button-primary py-1.5 text-xs self-start"
+              onClick={openCreateTopic}
+              className="button-primary py-1.5 text-xs self-start flex items-center gap-1"
             >
               <Plus size={14} /> Create Topic
             </button>
@@ -856,12 +992,18 @@ export function TeacherDashboard({ teacherEmail }: { teacherEmail: string }) {
             </div>
           </div>
 
-          {/* Topic Create / Edit Modal */}
+          {/* Topic Create / Edit Modal (Full Theory & Overview Editor) */}
           {(creatingTopic || editingTopic) && (
             <div className="modal-backdrop" role="presentation">
-              <div className="modal-panel max-w-xl">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-lg font-semibold">{editingTopic ? "Edit Topic" : "Create New Topic"}</h3>
+              <div className="modal-panel max-w-3xl max-h-[90vh] flex flex-col p-0 overflow-hidden">
+                {/* Modal Header */}
+                <div className="flex items-center justify-between border-b border-border p-5 bg-card">
+                  <div className="flex items-center gap-2">
+                    <BookOpen size={18} className="text-primary" />
+                    <h3 className="text-lg font-semibold text-foreground">
+                      {editingTopic ? `Editar Tema: ${editingTopic.title}` : "Crear Nuevo Tema"}
+                    </h3>
+                  </div>
                   <button
                     onClick={() => {
                       setCreatingTopic(false)
@@ -873,71 +1015,358 @@ export function TeacherDashboard({ teacherEmail }: { teacherEmail: string }) {
                   </button>
                 </div>
 
-                <form onSubmit={saveTopic} className="flex flex-col gap-4 mt-4">
-                  <label className="flex flex-col gap-1 text-xs font-medium">
-                    Topic Title
-                    <input
-                      type="text"
-                      required
-                      value={topicForm.title}
-                      onChange={(e) => setTopicForm({ ...topicForm, title: e.target.value })}
-                      placeholder="e.g. Present Continuous vs Present Simple"
-                      className="input-field text-sm"
-                    />
-                  </label>
+                {/* Tabs for General vs Theory */}
+                <div className="flex items-center gap-2 border-b border-border bg-secondary/30 px-5 pt-3">
+                  <button
+                    type="button"
+                    onClick={() => setTopicFormTab("general")}
+                    className={`px-4 py-2 text-xs font-semibold border-b-2 transition-colors ${
+                      topicFormTab === "general"
+                        ? "border-primary text-primary font-bold"
+                        : "border-transparent text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    1. Información General
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setTopicFormTab("theory")}
+                    className={`px-4 py-2 text-xs font-semibold border-b-2 transition-colors flex items-center gap-1.5 ${
+                      topicFormTab === "theory"
+                        ? "border-primary text-primary font-bold"
+                        : "border-transparent text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    <Sparkles size={13} /> 2. Topic Overview & Theory (Estructura, Imagen, Ejemplos)
+                  </button>
+                </div>
 
-                  <label className="flex flex-col gap-1 text-xs font-medium">
-                    CEFR Level
-                    <select
-                      value={topicForm.level}
-                      onChange={(e) => setTopicForm({ ...topicForm, level: e.target.value as CefrLevel })}
-                      className="input-field text-sm"
-                      disabled={!!editingTopic}
-                    >
-                      {cefrLevels.map((lvl) => (
-                        <option key={lvl.id} value={lvl.id}>
-                          {lvl.code} {lvl.exam} ({lvl.band})
-                        </option>
-                      ))}
-                    </select>
-                  </label>
+                <form onSubmit={saveTopic} className="flex flex-col flex-1 overflow-y-auto p-6 gap-5">
+                  {topicFormTab === "general" ? (
+                    <div className="flex flex-col gap-4 animate-in fade-in">
+                      <label className="flex flex-col gap-1 text-xs font-semibold text-foreground">
+                        Título del Tema (Topic Title)
+                        <input
+                          type="text"
+                          required
+                          value={topicForm.title}
+                          onChange={(e) => setTopicForm({ ...topicForm, title: e.target.value })}
+                          placeholder="e.g. Present simple forms of 'to be': am/is/are"
+                          className="input-field text-sm"
+                        />
+                      </label>
 
-                  <label className="flex flex-col gap-1 text-xs font-medium">
-                    Description
-                    <textarea
-                      rows={2}
-                      value={topicForm.description}
-                      onChange={(e) => setTopicForm({ ...topicForm, description: e.target.value })}
-                      placeholder="Short summary for students..."
-                      className="input-field text-sm"
-                    />
-                  </label>
+                      <div className="grid sm:grid-cols-2 gap-4">
+                        <label className="flex flex-col gap-1 text-xs font-semibold text-foreground">
+                          Nivel CEFR (CEFR Level)
+                          <select
+                            value={topicForm.level}
+                            onChange={(e) => setTopicForm({ ...topicForm, level: e.target.value as CefrLevel })}
+                            className="input-field text-sm"
+                          >
+                            {cefrLevels.map((lvl) => (
+                              <option key={lvl.id} value={lvl.id}>
+                                {lvl.code} {lvl.exam} ({lvl.band})
+                              </option>
+                            ))}
+                          </select>
+                        </label>
 
-                  <label className="flex flex-col gap-1 text-xs font-medium">
-                    Grammar Focus & Context
-                    <textarea
-                      rows={3}
-                      value={topicForm.focus}
-                      onChange={(e) => setTopicForm({ ...topicForm, focus: e.target.value })}
-                      placeholder="Grammar instructions and patterns for exercises..."
-                      className="input-field text-sm"
-                    />
-                  </label>
+                        {!editingTopic && (
+                          <label className="flex flex-col gap-1 text-xs font-semibold text-foreground">
+                            Slug identificador (URL)
+                            <input
+                              type="text"
+                              value={topicForm.slug}
+                              onChange={(e) => setTopicForm({ ...topicForm, slug: e.target.value })}
+                              placeholder="present-simple-to-be"
+                              className="input-field text-sm font-mono"
+                            />
+                          </label>
+                        )}
+                      </div>
 
-                  <div className="flex justify-end gap-2 mt-2">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setCreatingTopic(false)
-                        setEditingTopic(null)
-                      }}
-                      className="button-secondary text-xs"
-                    >
-                      Cancel
-                    </button>
-                    <button type="submit" disabled={busy} className="button-primary text-xs">
-                      Save Topic
-                    </button>
+                      <label className="flex flex-col gap-1 text-xs font-semibold text-foreground">
+                        Descripción Resumida (Description)
+                        <textarea
+                          rows={2}
+                          value={topicForm.description}
+                          onChange={(e) => setTopicForm({ ...topicForm, description: e.target.value })}
+                          placeholder="Breve resumen del contenido para los estudiantes..."
+                          className="input-field text-sm"
+                        />
+                      </label>
+
+                      <label className="flex flex-col gap-1 text-xs font-semibold text-foreground">
+                        Enfoque Gramatical (Grammar Focus & Context para IA)
+                        <textarea
+                          rows={3}
+                          value={topicForm.focus}
+                          onChange={(e) => setTopicForm({ ...topicForm, focus: e.target.value })}
+                          placeholder="Instrucciones lingüísticas y patrones gramaticales que la IA y el generador usarán..."
+                          className="input-field text-sm"
+                        />
+                      </label>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col gap-6 animate-in fade-in">
+                      {/* Subtitle / Concept */}
+                      <div className="flex flex-col gap-1.5 border border-border p-4 rounded-lg bg-secondary/20">
+                        <span className="text-xs font-bold uppercase tracking-wider text-primary">
+                          Subtítulo / Concepto Explicativo del Tema
+                        </span>
+                        <span className="text-[11px] text-muted-foreground">
+                          Para Young Learners (Starters, Movers, Flyers), incluye explicaciones en español fáciles de entender para niños.
+                        </span>
+                        <textarea
+                          rows={3}
+                          value={topicForm.concept}
+                          onChange={(e) => setTopicForm({ ...topicForm, concept: e.target.value })}
+                          className="input-field text-xs leading-relaxed"
+                          placeholder="The verb 'to be' has three forms: am, is, are. 🇪🇸 En español: El verbo 'to be' significa 'ser' o 'estar'..."
+                        />
+                      </div>
+
+                      {/* Key Grammar Formulas */}
+                      <div className="flex flex-col gap-3 border border-border p-4 rounded-lg bg-secondary/20">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-bold uppercase tracking-wider text-primary flex items-center gap-1.5">
+                            <Sparkles size={14} /> Key Grammar Structures (Reglas y Fórmulas)
+                          </span>
+                          <button
+                            type="button"
+                            onClick={addTopicFormula}
+                            className="button-secondary py-1 px-2 text-xs flex items-center gap-1 font-semibold"
+                          >
+                            <Plus size={13} /> Añadir Regla
+                          </button>
+                        </div>
+
+                        <div className="flex flex-col gap-2">
+                          {topicForm.formula.map((item, idx) => (
+                            <div key={idx} className="flex items-center gap-2 bg-card p-2 rounded border border-border">
+                              <input
+                                type="text"
+                                value={item.label}
+                                onChange={(e) => updateTopicFormula(idx, "label", e.target.value)}
+                                className="input-field w-32 shrink-0 text-xs font-mono uppercase font-bold"
+                                placeholder="AFIRMATIVO..."
+                              />
+                              <input
+                                type="text"
+                                value={item.text}
+                                onChange={(e) => updateTopicFormula(idx, "text", e.target.value)}
+                                className="input-field flex-1 text-xs"
+                                placeholder="I + am | He/She/It + is | You/We/They + are"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => removeTopicFormula(idx)}
+                                className="p-1.5 text-muted-foreground hover:text-destructive"
+                              >
+                                <Trash2 size={13} />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Optional Structure Diagram / Image */}
+                      <div className="flex flex-col gap-3 border border-border p-4 rounded-lg bg-secondary/20">
+                        <span className="text-xs font-bold uppercase tracking-wider text-primary flex items-center gap-1.5">
+                          <ImageIcon size={14} /> Imagen o Diagrama Explicativo de la Estructura (Opcional)
+                        </span>
+                        <span className="text-[11px] text-muted-foreground">
+                          Se mostrará directamente debajo de Key Grammar Structures, antes de los Natural Examples.
+                        </span>
+                        <div className="grid gap-3 sm:grid-cols-2">
+                          <div className="flex flex-col gap-1">
+                            <label className="text-[11px] text-muted-foreground font-semibold">URL de la imagen</label>
+                            <input
+                              type="url"
+                              value={topicForm.imageUrl}
+                              onChange={(e) => setTopicForm({ ...topicForm, imageUrl: e.target.value })}
+                              className="input-field text-xs"
+                              placeholder="https://ejemplo.com/diagrama-estructura.png"
+                            />
+                          </div>
+                          <div className="flex flex-col gap-1">
+                            <label className="text-[11px] text-muted-foreground font-semibold">Pie de foto / Descripción</label>
+                            <input
+                              type="text"
+                              value={topicForm.imageCaption}
+                              onChange={(e) => setTopicForm({ ...topicForm, imageCaption: e.target.value })}
+                              className="input-field text-xs"
+                              placeholder="Diagrama de uso de los tiempos verbales..."
+                            />
+                          </div>
+                        </div>
+
+                        {topicForm.imageUrl.trim() && (
+                          <div className="mt-2 p-3 bg-card border border-border rounded flex flex-col items-center gap-2">
+                            <span className="text-[11px] text-muted-foreground">Vista previa de la imagen:</span>
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img
+                              src={topicForm.imageUrl.trim()}
+                              alt={topicForm.imageCaption || "Structure Diagram Preview"}
+                              className="max-h-44 rounded object-contain border border-border shadow-sm"
+                              onError={(e) => {
+                                ;(e.target as HTMLElement).style.display = "none"
+                              }}
+                            />
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Natural Examples */}
+                      <div className="flex flex-col gap-3 border border-border p-4 rounded-lg bg-secondary/20">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-bold uppercase tracking-wider text-primary flex items-center gap-1.5">
+                            <CheckCircle2 size={14} /> Natural Examples (Ejemplos con Traducción y Tip)
+                          </span>
+                          <button
+                            type="button"
+                            onClick={addTopicExample}
+                            className="button-secondary py-1 px-2 text-xs flex items-center gap-1 font-semibold"
+                          >
+                            <Plus size={13} /> Añadir Ejemplo
+                          </button>
+                        </div>
+
+                        <div className="flex flex-col gap-3">
+                          {topicForm.examples.map((ex, idx) => (
+                            <div key={idx} className="flex flex-col gap-2 bg-card p-3 rounded border border-border">
+                              <div className="flex items-center justify-between">
+                                <span className="text-xs font-semibold text-primary">Ejemplo #{idx + 1}</span>
+                                <button
+                                  type="button"
+                                  onClick={() => removeTopicExample(idx)}
+                                  className="p-1 text-muted-foreground hover:text-destructive"
+                                >
+                                  <Trash2 size={13} />
+                                </button>
+                              </div>
+                              <div className="grid gap-2 sm:grid-cols-2">
+                                <input
+                                  type="text"
+                                  value={ex.en}
+                                  onChange={(e) => updateTopicExample(idx, "en", e.target.value)}
+                                  className="input-field text-xs font-serif font-medium"
+                                  placeholder="Oración en inglés (e.g. I am a student.)..."
+                                />
+                                <input
+                                  type="text"
+                                  value={ex.es}
+                                  onChange={(e) => updateTopicExample(idx, "es", e.target.value)}
+                                  className="input-field text-xs italic"
+                                  placeholder="Traducción al español (e.g. Yo soy estudiante.)..."
+                                />
+                              </div>
+                              <input
+                                type="text"
+                                value={ex.tip || ""}
+                                onChange={(e) => updateTopicExample(idx, "tip", e.target.value)}
+                                className="input-field text-xs bg-secondary/40"
+                                placeholder="Tip pedagógico (e.g. Usar 'am' solo con el pronombre 'I')..."
+                              />
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Tips & Common Mistakes */}
+                      <div className="flex flex-col gap-3 border border-border p-4 rounded-lg bg-secondary/20">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-bold uppercase tracking-wider text-amber-500 flex items-center gap-1.5">
+                            <Lightbulb size={14} /> Tips & Errores Comunes a Evitar
+                          </span>
+                          <button
+                            type="button"
+                            onClick={addTopicTip}
+                            className="button-secondary py-1 px-2 text-xs flex items-center gap-1 font-semibold"
+                          >
+                            <Plus size={13} /> Añadir Tip
+                          </button>
+                        </div>
+
+                        <div className="flex flex-col gap-2">
+                          {topicForm.tips.map((tip, idx) => (
+                            <div key={idx} className="flex items-center gap-2 bg-card p-2 rounded border border-border">
+                              <input
+                                type="text"
+                                value={tip}
+                                onChange={(e) => updateTopicTip(idx, e.target.value)}
+                                className="input-field flex-1 text-xs"
+                                placeholder="Consejo pedagógico o error común a evitar..."
+                              />
+                              <button
+                                type="button"
+                                onClick={() => removeTopicTip(idx)}
+                                className="p-1 text-muted-foreground hover:text-destructive"
+                              >
+                                <Trash2 size={13} />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Key Topic Words & Phonetics */}
+                      <div className="flex flex-col gap-1.5 border border-border p-4 rounded-lg bg-secondary/20">
+                        <span className="text-xs font-bold uppercase tracking-wider text-primary flex items-center gap-1.5">
+                          <Volume2 size={14} /> Palabras Clave del Tema (Audio y Fonética)
+                        </span>
+                        <span className="text-[11px] text-muted-foreground">
+                          Palabras separadas por comas. El sistema genera los botones interactivos con audio y fonética.
+                        </span>
+                        <input
+                          type="text"
+                          value={topicForm.keyWords}
+                          onChange={(e) => setTopicForm({ ...topicForm, keyWords: e.target.value })}
+                          className="input-field text-xs font-mono"
+                          placeholder="am, is, are, student, teacher, school, happy"
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Modal Footer */}
+                  <div className="flex items-center justify-between border-t border-border pt-4 mt-auto">
+                    <div className="flex items-center gap-2">
+                      {topicFormTab === "general" ? (
+                        <button
+                          type="button"
+                          onClick={() => setTopicFormTab("theory")}
+                          className="button-secondary text-xs flex items-center gap-1"
+                        >
+                          Siguiente: Editar Teoría <ChevronRight size={13} />
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => setTopicFormTab("general")}
+                          className="button-secondary text-xs flex items-center gap-1"
+                        >
+                          <ArrowLeft size={13} /> Volver a General
+                        </button>
+                      )}
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setCreatingTopic(false)
+                          setEditingTopic(null)
+                        }}
+                        className="button-secondary text-xs"
+                      >
+                        Cancelar
+                      </button>
+                      <button type="submit" disabled={busy} className="button-primary text-xs flex items-center gap-1">
+                        {busy ? "Guardando..." : "Guardar Tema"}
+                      </button>
+                    </div>
                   </div>
                 </form>
               </div>
@@ -1001,18 +1430,9 @@ export function TeacherDashboard({ teacherEmail }: { teacherEmail: string }) {
                 <div className="flex items-center justify-between border-t border-border pt-3">
                   <div className="flex items-center gap-1">
                     <button
-                      onClick={() => {
-                        setEditingTopic(t)
-                        setTopicForm({
-                          title: t.title,
-                          slug: t.slug,
-                          level: t.level,
-                          description: t.description ?? "",
-                          focus: t.focus ?? "",
-                        })
-                      }}
+                      onClick={() => openEditTopic(t)}
                       className="icon-button size-8"
-                      title="Edit topic"
+                      title="Edit topic & theory"
                     >
                       <Edit2 size={13} />
                     </button>

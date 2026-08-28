@@ -1,5 +1,16 @@
 import type { CefrLevel } from "./question-bank"
 
+export type TopicTheoryData = {
+  title?: string
+  concept?: string
+  imageUrl?: string
+  imageCaption?: string
+  formula?: Array<{ label: string; text: string }>
+  examples?: Array<{ en: string; es: string; tip?: string }>
+  tips?: string[]
+  keyWords?: string[]
+}
+
 export type TopicDef = {
   slug: string
   level: CefrLevel
@@ -7,6 +18,8 @@ export type TopicDef = {
   description: string
   /** Grammar instructions and linguistic context for this topic */
   focus: string
+  theory?: TopicTheoryData | null
+  enabled?: boolean
 }
 
 export const topicCatalog: TopicDef[] = [
@@ -1414,5 +1427,437 @@ export function resolveTopicSlug(slug: string, level: CefrLevel): TopicDef | nul
   if (titleMatch) return titleMatch
 
   return null
+}
+
+/**
+ * Returns complete pedagogical theory for any topic.
+ * Young Learners (Pre A1 Starters, A1 Movers, A2 Flyers) get rich, child-friendly bilingual (EN/ES) explanations.
+ */
+export function getDefaultTopicTheoryData(topic: TopicDef, level: CefrLevel): TopicTheoryData {
+  if (topic.theory) return topic.theory
+
+  const slug = (topic.slug || "").toLowerCase()
+  const isYoungLearner =
+    level === "pre-a1-starters" ||
+    level === "a1-movers" ||
+    level === "a2-flyers" ||
+    topic.level === "pre-a1-starters" ||
+    topic.level === "a1-movers" ||
+    topic.level === "a2-flyers"
+
+  // -------------------------------------------------------------------------
+  // 1. TO BE / WAS-WERE
+  // -------------------------------------------------------------------------
+  if (slug.includes("to-be") || slug.includes("was-were")) {
+    const isPast = slug.includes("was-were")
+    if (isYoungLearner) {
+      return {
+        concept: isPast
+          ? "The verb 'to be' in the past (was / were) means 'era', 'fue' o 'estaba'. 🇪🇸 En español: Usamos 'was' (era/estaba) para una sola persona (I, He, She, It) y 'were' (éramos/estaban) para varias personas (You, We, They)."
+          : "The verb 'to be' means 'ser' o 'estar'. In the present simple, it has three forms: am, is, and are. 🇪🇸 En español: El verbo 'to be' significa 'ser' o 'estar'. Usamos 'am' (soy/estoy), 'is' (es/está) y 'are' (somos/son/están).",
+        formula: isPast
+          ? [
+              { label: "AFIRMATIVO / AFFIRMATIVE", text: "I / He / She / It + was (era/estaba) | You / We / They + were (éramos/estaban)" },
+              { label: "NEGATIVO / NEGATIVE", text: "was not (wasn't) | were not (weren't)" },
+              { label: "PREGUNTAS / QUESTIONS", text: "Was I/he/she/it...? | Were you/we/they...?" },
+            ]
+          : [
+              { label: "AFIRMATIVO / AFFIRMATIVE", text: "I + am (Yo soy/estoy) | He / She / It + is (Él/Ella/Eso es/está) | You / We / They + are (Tú eres, Nosotros somos, Ellos son)" },
+              { label: "NEGATIVO / NEGATIVE", text: "I am not (I'm not) | He/She/It is not (isn't) | You/We/They are not (aren't)" },
+              { label: "PREGUNTAS / QUESTIONS", text: "Am I...? | Is he/she/it...? | Are you/we/they...?" },
+            ],
+        examples: isPast
+          ? [
+              { en: "I was at the park yesterday.", es: "Yo estaba en el parque ayer.", tip: "Usamos 'was' porque habla de 'I' (yo) en el pasado." },
+              { en: "They were very happy with the puppies.", es: "Ellos estaban muy felices con los perritos.", tip: "Usamos 'were' porque 'they' son varias personas (plural)." },
+            ]
+          : [
+              { en: "I am a student.", es: "Yo soy estudiante.", tip: "Usamos 'am' únicamente con el pronombre 'I' (yo)." },
+              { en: "The cat is on the sofa.", es: "El gato está en el sofá.", tip: "Usamos 'is' con una sola persona, animal o cosa (singular)." },
+              { en: "We are best friends.", es: "Nosotros somos mejores amigos.", tip: "Usamos 'are' para grupos de dos o más personas (plural) y con 'you'." },
+            ],
+        tips: [
+          "🇪🇸 ¡Regla de oro! 'I' siempre va con 'am'. Nunca digas 'I is'.",
+          "🇪🇸 Truco fácil: Si hablas de uno solo (He, She, It, el perro, la casa), usa 'is'.",
+          "🇪🇸 Truco fácil: Si hablas de varios (We, They, mis amigos), usa 'are'.",
+          "🇪🇸 Recuerda: 'You' siempre usa 'are' (presente) o 'were' (pasado).",
+        ],
+        keyWords: isPast ? ["yesterday", "last night", "was", "were", "ago"] : ["am", "is", "are", "student", "teacher", "happy", "school", "friends"],
+      }
+    }
+    return {
+      concept: isPast
+        ? "The verb 'to be' in the past simple has two forms: was and were. It describes past states, emotions, locations, or identities."
+        : "The verb 'to be' is the most fundamental verb in English. In the present simple, it has three forms: am, is, and are.",
+      formula: isPast
+        ? [
+            { label: "Affirmative", text: "I / He / She / It + was | You / We / They + were" },
+            { label: "Negative", text: "Subject + was not (wasn't) / were not (weren't)" },
+            { label: "Questions", text: "Was / Were + Subject + ... ?" },
+          ]
+        : [
+            { label: "Affirmative", text: "I + am | He / She / It + is | You / We / They + are" },
+            { label: "Negative", text: "Subject + am not / is not (isn't) / are not (aren't)" },
+            { label: "Questions", text: "Am / Is / Are + Subject + ... ?" },
+          ],
+      examples: isPast
+        ? [
+            { en: "She was at the library yesterday.", es: "Ella estaba en la biblioteca ayer.", tip: "Use 'was' with singular third person." },
+            { en: "They were very excited about the game.", es: "Ellos estaban muy emocionados por el partido.", tip: "Use 'were' with plural subjects." },
+          ]
+        : [
+            { en: "I am a student at the language center.", es: "Soy estudiante en el centro de idiomas.", tip: "Only use 'am' with pronoun 'I'." },
+            { en: "The book is on the desk.", es: "El libro está sobre el escritorio.", tip: "Use 'is' with singular nouns and he/she/it." },
+          ],
+      tips: [
+        "In spoken English and informal writing, contractions (I'm, she's, they're, isn't, weren't) are standard.",
+        "Remember that 'You' always takes 'are' (present) or 'were' (past), even when referring to one person.",
+      ],
+      keyWords: isPast ? ["yesterday", "last night", "ago", "were", "was"] : ["always", "today", "now", "student", "teacher"],
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // 2. PRESENT CONTINUOUS
+  // -------------------------------------------------------------------------
+  if (slug.includes("present-continuous")) {
+    if (isYoungLearner) {
+      return {
+        concept: "The Present Continuous (am/is/are + verb-ing) describes actions happening RIGHT NOW! 🇪🇸 En español: Se usa para acciones que están pasando en este mismo momento (jugando, comiendo, durmiendo).",
+        formula: [
+          { label: "AFIRMATIVO / AFFIRMATIVE", text: "Subject + am / is / are + verb-ing (I am playing / He is eating / They are running)" },
+          { label: "NEGATIVO / NEGATIVE", text: "Subject + am not / isn't / aren't + verb-ing (She isn't sleeping)" },
+          { label: "PREGUNTAS / QUESTIONS", text: "Am / Is / Are + Subject + verb-ing...? (Are you listening?)" },
+        ],
+        examples: [
+          { en: "Look! The boy is jumping.", es: "¡Mira! El niño está saltando.", tip: "Palabras como 'Look!' o 'Now' indican que pasa en este momento." },
+          { en: "They are playing football in the garden.", es: "Ellos están jugando fútbol en el jardín.", tip: "Usamos 'are' porque 'they' son varias personas." },
+        ],
+        tips: [
+          "🇪🇸 ¡No olvides el verbo to be! No digas 'He playing', di 'He is playing'.",
+          "🇪🇸 Para formar el '-ing': play -> playing, read -> reading, jump -> jumping.",
+          "🇪🇸 Si el verbo termina en 'e' muda, se quita la 'e': dance -> dancing, write -> writing.",
+        ],
+        keyWords: ["now", "right now", "playing", "eating", "reading", "running", "look", "listen"],
+      }
+    }
+    return {
+      concept: "The Present Continuous (am/is/are + verb-ing) describes actions taking place right now, temporary situations, or definite future plans.",
+      formula: [
+        { label: "Affirmative", text: "Subject + am/is/are + verb-ing" },
+        { label: "Negative", text: "Subject + am/is/are + not + verb-ing" },
+        { label: "Questions", text: "Am/Is/Are + Subject + verb-ing ... ?" },
+      ],
+      examples: [
+        { en: "She is writing an email right now.", es: "Ella está escribiendo un correo ahora mismo.", tip: "Actions happening at the moment of speaking." },
+        { en: "Look! They are playing in the garden.", es: "¡Mira! Están jugando en el jardín.", tip: "Words like 'Look!' or 'Listen!' signal present continuous." },
+      ],
+      tips: [
+        "Stative verbs (like love, know, understand, believe, want) are rarely used in continuous tenses.",
+        "Spelling rule: verbs ending in consonant-vowel-consonant double the last consonant (run -> running, sit -> sitting).",
+      ],
+      keyWords: ["now", "right now", "at the moment", "look", "listen"],
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // 3. HAVE / HAS GOT
+  // -------------------------------------------------------------------------
+  if (slug.includes("have-has-got") || slug.includes("have-has")) {
+    if (isYoungLearner) {
+      return {
+        concept: "We use 'have got' and 'has got' to talk about possessions, family, and physical features. 🇪🇸 En español: Significa 'tener'. Se usa para hablar de cosas que tenemos, de nuestra familia o de cómo somos físicamente.",
+        formula: [
+          { label: "AFIRMATIVO / AFFIRMATIVE", text: "I / You / We / They + have got ('ve got) | He / She / It + has got ('s got)" },
+          { label: "NEGATIVO / NEGATIVE", text: "haven't got (no tener) | hasn't got (él/ella no tiene)" },
+          { label: "PREGUNTAS / QUESTIONS", text: "Have you got...? (¿Tienes...?) | Has he/she got...? (¿Tiene él/ella...?)" },
+        ],
+        examples: [
+          { en: "I have got a new blue bicycle.", es: "Tengo una bicicleta azul nueva.", tip: "Con 'I' (yo) usamos 'have got'." },
+          { en: "She has got two brothers and green eyes.", es: "Ella tiene dos hermanos y ojos verdes.", tip: "Con 'She' (ella) usamos 'has got'." },
+        ],
+        tips: [
+          "🇪🇸 Cuidado con He / She / It: siempre llevan 'has got', nunca 'have got'.",
+          "🇪🇸 Respuestas cortas: 'Yes, I have' / 'No, I haven't' (¡no agregues 'got' al final!).",
+        ],
+        keyWords: ["have", "has", "got", "eyes", "hair", "brother", "sister", "bicycle", "pet"],
+      }
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // 4. CAN / CAN'T (ABILITY & PERMISSION)
+  // -------------------------------------------------------------------------
+  if (slug.includes("can-cant") || slug.includes("ability")) {
+    if (isYoungLearner) {
+      return {
+        concept: "We use 'can' and 'can't' for things we are able to do or allowed to do. 🇪🇸 En español: Significa 'poder' o 'saber hacer algo' (ej. saber nadar, poder correr, pedir permiso).",
+        formula: [
+          { label: "AFIRMATIVO / AFFIRMATIVE", text: "Subject + can + verb (I can swim / Birds can fly)" },
+          { label: "NEGATIVO / NEGATIVE", text: "Subject + cannot / can't + verb (Fish can't walk)" },
+          { label: "PREGUNTAS / QUESTIONS", text: "Can + Subject + verb...? (Can you jump high?)" },
+        ],
+        examples: [
+          { en: "A monkey can climb tall trees.", es: "Un mono puede trepar árboles altos.", tip: "Después de 'can' el verbo va en su forma simple (sin 'to' ni '-ing')." },
+          { en: "I can't speak Italian, but I can speak English.", es: "No sé hablar italiano, pero sé hablar inglés.", tip: "'Can't' es la forma corta de 'cannot'." },
+        ],
+        tips: [
+          "🇪🇸 ¡Súper fácil! 'Can' es igual para todas las personas (I can, you can, he can, they can).",
+          "🇪🇸 Nunca pongas 'to' después de 'can' (di 'I can swim', NO 'I can to swim').",
+        ],
+        keyWords: ["can", "cant", "swim", "fly", "jump", "sing", "dance", "speak", "play"],
+      }
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // 5. THIS, THAT, THESE, THOSE
+  // -------------------------------------------------------------------------
+  if (slug.includes("this-that") || slug.includes("demonstrative") || slug.includes("this-vs-it")) {
+    if (isYoungLearner) {
+      return {
+        concept: "This and That are for ONE thing. These and Those are for TWO OR MORE things! 🇪🇸 En español: 'This' (esto/este) y 'These' (estos/estas) para lo que está CERCA. 'That' (eso/aquel) y 'Those' (esos/aquellos) para lo que está LEJOS.",
+        formula: [
+          { label: "CERCA / NEAR (en la mano o aquí)", text: "THIS IS (1 cosa cerca) | THESE ARE (varias cosas cerca)" },
+          { label: "LEJOS / FAR (allá a la distancia)", text: "THAT IS (1 cosa lejos) | THOSE ARE (varias cosas lejos)" },
+        ],
+        examples: [
+          { en: "This is my red pencil in my hand.", es: "Este es mi lápiz rojo en mi mano.", tip: "Está cerca y es uno solo -> This is." },
+          { en: "Those birds are flying high in the sky.", es: "Aquellos pájaros están volando alto en el cielo.", tip: "Están lejos y son varios -> Those are." },
+        ],
+        tips: [
+          "🇪🇸 Singular (1): This / That -> van con 'is'.",
+          "🇪🇸 Plural (2+): These / Those -> van con 'are'.",
+          "🇪🇸 'This' suena corto (/ðɪs/), 'These' suena con 'i' larga (/ðiːz/).",
+        ],
+        keyWords: ["this", "that", "these", "those", "here", "there", "near", "far"],
+      }
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // 6. A / AN & PLURALS
+  // -------------------------------------------------------------------------
+  if (slug.includes("a-an") || slug.includes("plural")) {
+    if (isYoungLearner) {
+      return {
+        concept: "Use 'a' before consonant sounds and 'an' before vowel sounds (a, e, i, o, u). 🇪🇸 En español: 'A' y 'an' significan 'un' o 'una'. Usamos 'an' antes de vocal para que suene fluido (an apple, an elephant). Para plural agregamos '-s'.",
+        formula: [
+          { label: "A + SONIDO CONSONANTE", text: "a book, a dog, a car, a banana, a teacher" },
+          { label: "AN + SONIDO VOCAL (A, E, I, O, U)", text: "an apple, an elephant, an ice cream, an orange, an umbrella" },
+          { label: "PLURAL (+S / +ES)", text: "1 cat -> 2 cats | 1 box -> 2 boxes | 1 bus -> 2 buses" },
+        ],
+        examples: [
+          { en: "I have an orange and a sandwich in my bag.", es: "Tengo una naranja y un sándwich en mi mochila.", tip: "'Orange' empieza con sonido vocal (an), 'sandwich' con consonante (a)." },
+          { en: "Look at the three big dogs in the park.", es: "Mira los tres perros grandes en el parque.", tip: "En plural no usamos 'a' ni 'an', agregamos '-s' al sustantivo." },
+        ],
+        tips: [
+          "🇪🇸 'A' y 'an' solo se usan con UNA sola cosa (singular). Nunca digas 'a books'.",
+          "🇪🇸 Palabras que terminan en -s, -ss, -sh, -ch, -x agregan '-es' en plural (box -> boxes, watch -> watches).",
+        ],
+        keyWords: ["apple", "elephant", "orange", "umbrella", "book", "dog", "cats", "boxes"],
+      }
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // 7. THERE IS / THERE ARE
+  // -------------------------------------------------------------------------
+  if (slug.includes("there-is") || slug.includes("there-are") || slug.includes("there-or-it")) {
+    if (isYoungLearner) {
+      return {
+        concept: "There is (1 thing) and There are (2+ things) mean 'HAY' in Spanish! 🇪🇸 En español: 'There is' = hay una sola cosa. 'There are' = hay dos o más cosas.",
+        formula: [
+          { label: "PRESENTE / PRESENT", text: "There is + singular (There is a cat) | There are + plural (There are five dogs)" },
+          { label: "PASADO / PAST", text: "There was + singular (Había uno) | There were + plural (Había varios)" },
+          { label: "PREGUNTAS / QUESTIONS", text: "Is there a...? (¿Hay uno...?) | Are there any...? (¿Hay algunos...?)" },
+        ],
+        examples: [
+          { en: "There is a big clock on the wall.", es: "Hay un reloj grande en la pared.", tip: "Usamos 'There is' porque es un solo reloj." },
+          { en: "There are four apples in the basket.", es: "Hay cuatro manzanas en la canasta.", tip: "Usamos 'There are' porque son cuatro (plural)." },
+        ],
+        tips: [
+          "🇪🇸 Para una sola cosa: There is (forma corta: There's).",
+          "🇪🇸 Para varias cosas: There are (no se puede abreviar en afirmación).",
+          "🇪🇸 Para preguntar, invierte el orden: 'Is there...?' o 'Are there...?'",
+        ],
+        keyWords: ["there", "is", "are", "was", "were", "clock", "table", "room", "basket"],
+      }
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // 8. POSSESSIVE ADJECTIVES (MY, YOUR, HIS, HER, OUR, THEIR)
+  // -------------------------------------------------------------------------
+  if (slug.includes("possessive") || slug.includes("pronouns")) {
+    if (isYoungLearner) {
+      return {
+        concept: "Possessive adjectives show who owns something! 🇪🇸 En español: Indican de quién es cada cosa: my (mi), your (tu), his (su de él), her (su de ella), our (nuestro), their (su de ellos).",
+        formula: [
+          { label: "PRONOMBRES Y POSESIVOS", text: "I -> my (mi) | you -> your (tu) | he -> his (su de él) | she -> her (su de ella) | it -> its (su de un animal/cosa) | we -> our (nuestro) | they -> their (su de ellos)" },
+        ],
+        examples: [
+          { en: "This is my jacket and that is his backpack.", es: "Esta es mi chaqueta y esa es la mochila de él.", tip: "'His' significa 'su' cuando pertenece a un niño o varón." },
+          { en: "Emma is playing with her new doll.", es: "Emma está jugando con su muñeca nueva.", tip: "'Her' significa 'su' cuando pertenece a una niña o mujer." },
+        ],
+        tips: [
+          "🇪🇸 ¡Cuidado especial! Para un chico usa 'his', para una chica usa 'her'.",
+          "🇪🇸 'Our' es para 'nosotros' (our school = nuestra escuela).",
+          "🇪🇸 'Their' es para 'ellos' (their house = la casa de ellos).",
+        ],
+        keyWords: ["my", "your", "his", "her", "its", "our", "their", "bag", "toy", "family"],
+      }
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // 9. PREPOSITIONS OF PLACE (IN, ON, AT, UNDER, NEXT TO, BEHIND)
+  // -------------------------------------------------------------------------
+  if (slug.includes("preposition") || slug.includes("place") || slug.includes("at-in-on")) {
+    if (isYoungLearner) {
+      return {
+        concept: "Prepositions of place tell us WHERE something is! 🇪🇸 En español: Indican dónde está un objeto o persona: in (adentro), on (sobre/encima), under (debajo), next to (al lado), behind (detrás), in front of (delante de).",
+        formula: [
+          { label: "IN (ADENTRO)", text: "in the box, in the room, in the bag (dentro de un espacio cerrado)" },
+          { label: "ON (SOBRE LA SUPERFICIE)", text: "on the table, on the floor, on the wall (tocando la superficie)" },
+          { label: "POSICIONES", text: "under (debajo) | next to (al lado) | behind (detrás) | in front of (delante)" },
+        ],
+        examples: [
+          { en: "The cat is sleeping under the table.", es: "El gato está durmiendo debajo de la mesa.", tip: "'Under' significa debajo." },
+          { en: "My books are in the schoolbag.", es: "Mis libros están dentro de la mochila.", tip: "'In' significa adentro." },
+          { en: "The teacher is in front of the board.", es: "La maestra está delante de la pizarra.", tip: "'In front of' significa delante de." },
+        ],
+        tips: [
+          "🇪🇸 'On' toca la superficie (on the desk). 'In' está adentro cerrado (in the box).",
+          "🇪🇸 'Next to' va siempre con 'to' (next to the door = al lado de la puerta).",
+        ],
+        keyWords: ["in", "on", "under", "next to", "behind", "in front of", "between", "box", "table"],
+      }
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // 10. PAST SIMPLE (REGULAR & IRREGULAR) - MOVERS / FLYERS
+  // -------------------------------------------------------------------------
+  if (slug.includes("past-simple") || slug.includes("regular-irregular")) {
+    if (isYoungLearner) {
+      return {
+        concept: "We use the Past Simple for actions that finished in the past (yesterday, last week). 🇪🇸 En español: El pasado simple se usa para contar cosas que ya pasaron (jugó, comió, fue). A los verbos regulares les agregamos '-ed'.",
+        formula: [
+          { label: "REGULARES (+ED)", text: "play -> played | watch -> watched | walk -> walked" },
+          { label: "IRREGULARES (MEMORIA)", text: "go -> went | see -> saw | have -> had | eat -> ate | do -> did" },
+          { label: "NEGATIVO Y PREGUNTAS", text: "didn't + verbo base (I didn't go) | Did you + verbo base...? (Did you see?)" },
+        ],
+        examples: [
+          { en: "Yesterday, I played video games with my brother.", es: "Ayer jugué videojuegos con mi hermano.", tip: "Palabras como 'yesterday' indican que la acción terminó en el pasado." },
+          { en: "She went to the zoo last Saturday.", es: "Ella fue al zoológico el sábado pasado.", tip: "'Went' es el pasado irregular de 'go'." },
+        ],
+        tips: [
+          "🇪🇸 Cuando usas 'didn't' o 'Did...?', el verbo vuelve a su forma normal (di 'I didn't play', NO 'I didn't played').",
+          "🇪🇸 Palabras clave de tiempo pasado: yesterday (ayer), last night (anoche), last week (la semana pasada), ago (hace...).",
+        ],
+        keyWords: ["yesterday", "last", "played", "went", "saw", "had", "ate", "did", "didn't"],
+      }
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // 11. COMPARATIVES & SUPERLATIVES - MOVERS / FLYERS
+  // -------------------------------------------------------------------------
+  if (slug.includes("comparative") || slug.includes("superlative")) {
+    if (isYoungLearner) {
+      return {
+        concept: "Comparatives compare 2 things (-er than). Superlatives show the #1 of all (the -est). 🇪🇸 En español: Comparativos (más que): taller than (más alto que). Superlativos (el más): the tallest (el más alto).",
+        formula: [
+          { label: "COMPARATIVO (+ER THAN)", text: "fast -> faster than | big -> bigger than | small -> smaller than" },
+          { label: "SUPERLATIVO (THE +EST)", text: "the fastest (el más rápido) | the biggest | the smallest" },
+          { label: "IRREGULARES", text: "good -> better than -> the best | bad -> worse than -> the worst" },
+        ],
+        examples: [
+          { en: "An elephant is bigger than a lion.", es: "Un elefante es más grande que un león.", tip: "Comparamos 2 animales -> bigger than." },
+          { en: "The blue whale is the biggest animal in the world.", es: "La ballena azul es el animal más grande del mundo.", tip: "Es el número 1 de todos -> the biggest." },
+        ],
+        tips: [
+          "🇪🇸 Siempre pon 'than' después del comparativo (taller than, bigger than).",
+          "🇪🇸 Siempre pon 'the' antes del superlativo (the tallest, the best).",
+        ],
+        keyWords: ["bigger", "smaller", "faster", "taller", "the biggest", "the best", "than"],
+      }
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // 12. PHONETICS & PRONUNCIATION
+  // -------------------------------------------------------------------------
+  if (slug.includes("phonetic") || slug.includes("pronunciation")) {
+    return {
+      concept: isYoungLearner
+        ? "In English, words sound different from how they are written! 🇪🇸 En español: En inglés las letras pueden sonar diferente. Haz clic en el botón de audio 🔊 en cada palabra para escuchar cómo se pronuncia con acento nativo."
+        : "English is not a phonetic language—words are often pronounced differently from how they are spelled. Mastering IPA and word stress builds clear listening and speaking skills.",
+      formula: [
+        { label: "Vowel Sounds", text: "Short vowels (/ɪ/, /e/, /æ/, /ʌ/, /ɒ/, /ʊ/) vs Long vowels (/iː/, /ɑː/, /ɔː/, /uː/, /ɜː/)" },
+        { label: "Diphthongs", text: "Two vowel sounds gliding together (/eɪ/, /aɪ/, /ɔɪ/, /aʊ/, /əʊ/, /ɪə/, /eə/)" },
+        { label: "Word Stress", text: "The mark (ˈ) indicates the primary stressed syllable in the phonetic transcription." },
+      ],
+      examples: [
+        { en: "Ship (/ʃɪp/) vs Sheep (/ʃiːp/)", es: "Diferencia entre vocal corta /ɪ/ (barco) y vocal larga /iː/ (oveja).", tip: "El largo del sonido vocal cambia totalmente el significado de la palabra." },
+        { en: "Cat (/kæt/) vs Cut (/kʌt/)", es: "Diferencia entre sonido /æ/ (gato) y /ʌ/ (cortar).", tip: "Abre la boca un poco más para el sonido /æ/ de 'cat'." },
+      ],
+      tips: [
+        "🔊 Haz clic en el parlante al lado de cada palabra para escuchar la pronunciación.",
+        "👂 Repite en voz alta después de escuchar para mejorar tu entonación y confianza.",
+      ],
+      keyWords: ["pronunciation", "vowel", "consonant", "accent", "syllable", "sound", "listen"],
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // 13. SMART BILINGUAL GENERATOR FOR ALL OTHER YOUNG LEARNERS TOPICS
+  // -------------------------------------------------------------------------
+  if (isYoungLearner) {
+    return {
+      concept: `${topic.title}: ${topic.description || "Learn and practise this fundamental English topic."} 🇪🇸 En español: ${topic.description || "Aprende y practica este tema paso a paso con explicaciones sencillas y ejemplos para principiantes."}`,
+      formula: [
+        { label: "REGLA PRINCIPAL / MAIN RULE", text: topic.focus || "Aprende la estructura básica y practica con oraciones cortas." },
+        { label: "USO Y CONTEXTO", text: "Usa palabras y vocabulario cotidiano adecuado para el nivel " + level.toUpperCase() },
+      ],
+      examples: [
+        {
+          en: `Practise ${topic.title} with everyday English.`,
+          es: `Practica ${topic.title} con oraciones sencillas y claras en español.`,
+          tip: "Presta atención al sujeto y al orden de las palabras.",
+        },
+      ],
+      tips: [
+        "🇪🇸 Lee la oración completa con atención antes de elegir tu respuesta.",
+        "🇪🇸 Si te equivocas, lee la explicación en español para entender la regla.",
+        "🇪🇸 ¡La práctica diaria te ayudará a ganar confianza en inglés!",
+      ],
+      keyWords: ["practice", "english", "learn", "words", "sentence", "grammar", "easy"],
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // 14. DEFAULT PEDAGOGICAL BREAKDOWN (HIGHER LEVELS B1-C2)
+  // -------------------------------------------------------------------------
+  return {
+    concept: topic.description || `Understanding and applying the grammar principles of "${topic.title}".`,
+    formula: [
+      { label: "Grammar Focus", text: topic.focus || "Core linguistic structure" },
+      { label: "Application", text: "Use appropriate sentence structures and register appropriate for CEFR " + level.toUpperCase() },
+    ],
+    examples: [
+      {
+        en: `Practise ${topic.title} in real-world contexts.`,
+        es: "Ejemplo contextualizado según el nivel correspondiente.",
+        tip: "Pay attention to word order, auxiliary verbs, and nuance.",
+      },
+    ],
+    tips: [
+      "Read each sentence carefully and identify the time markers and subject-verb agreement.",
+      "Review explanations after each question to reinforce the grammar rule.",
+    ],
+    keyWords: ["grammar", "practice", "sentence", "context", "accuracy"],
+  }
 }
 

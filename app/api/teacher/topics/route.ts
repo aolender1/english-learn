@@ -20,6 +20,7 @@ export async function GET() {
         title: topics.title,
         description: topics.description,
         focus: topics.focus,
+        theory: topics.theory,
         enabled: topics.enabled,
         sortOrder: topics.sortOrder,
         createdAt: topics.createdAt,
@@ -66,6 +67,7 @@ export async function POST(request: Request) {
     title?: string
     description?: string
     focus?: string
+    theory?: unknown
   }
   try {
     body = await request.json()
@@ -93,8 +95,19 @@ export async function POST(request: Request) {
         title: body.title.trim(),
         description: body.description?.trim() ?? "",
         focus: body.focus?.trim() ?? "",
+        theory: body.theory ?? null,
         enabled: true,
         sortOrder: 999,
+      })
+      .onConflictDoUpdate({
+        target: [topics.slug, topics.level],
+        set: {
+          title: body.title.trim(),
+          description: body.description?.trim() ?? "",
+          focus: body.focus?.trim() ?? "",
+          theory: body.theory ?? null,
+          updatedAt: new Date(),
+        },
       })
       .returning()
 
@@ -118,6 +131,7 @@ export async function PATCH(request: Request) {
     title?: string
     description?: string
     focus?: string
+    theory?: unknown
     enabled?: boolean
     sortOrder?: number
     newLevel?: string // for moving topic to another level
@@ -128,14 +142,42 @@ export async function PATCH(request: Request) {
     return jsonError("Invalid JSON body.", 400)
   }
 
-  if (!body.id) {
-    return jsonError("Topic ID is required.", 400)
-  }
-
   try {
-    // Find current topic
-    const [current] = await db.select().from(topics).where(eq(topics.id, body.id)).limit(1)
-    if (!current) return jsonError("Topic not found.", 404)
+    // Find current topic by ID or by slug + level
+    let current: typeof topics.$inferSelect | undefined
+
+    if (body.id) {
+      const [found] = await db.select().from(topics).where(eq(topics.id, body.id)).limit(1)
+      current = found
+    } else if (body.slug && body.level) {
+      const [found] = await db
+        .select()
+        .from(topics)
+        .where(and(eq(topics.slug, body.slug), eq(topics.level, body.level)))
+        .limit(1)
+      current = found
+    }
+
+    // If not found in DB but slug and level exist (e.g. from static catalog), create it first
+    if (!current && body.slug && body.level && body.title) {
+      const [created] = await db
+        .insert(topics)
+        .values({
+          slug: body.slug,
+          level: body.level as CefrLevel,
+          title: body.title.trim(),
+          description: body.description?.trim() ?? "",
+          focus: body.focus?.trim() ?? "",
+          theory: body.theory ?? null,
+          enabled: true,
+        })
+        .returning()
+      return Response.json({ topic: created })
+    }
+
+    if (!current) {
+      return jsonError("Topic not found. Provide ID or valid Slug + Level.", 404)
+    }
 
     const targetLevel = (body.newLevel || body.level || current.level) as CefrLevel
 
@@ -146,11 +188,12 @@ export async function PATCH(request: Request) {
         title: body.title !== undefined ? body.title.trim() : current.title,
         description: body.description !== undefined ? body.description.trim() : current.description,
         focus: body.focus !== undefined ? body.focus.trim() : current.focus,
+        theory: body.theory !== undefined ? body.theory : current.theory,
         enabled: body.enabled !== undefined ? body.enabled : current.enabled,
         sortOrder: body.sortOrder !== undefined ? body.sortOrder : current.sortOrder,
         updatedAt: new Date(),
       })
-      .where(eq(topics.id, body.id))
+      .where(eq(topics.id, current.id))
       .returning()
 
     // If level changed, also update all associated exercises

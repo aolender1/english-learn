@@ -30,6 +30,7 @@ export async function GET(request: Request) {
             title: t.title,
             description: t.description ?? "",
             focus: t.focus ?? "",
+            theory: t.theory ?? null,
           })),
       })
     }

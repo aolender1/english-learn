@@ -126,11 +126,18 @@ export function DictionaryDialog({ isOpen, onClose, initialQuery = "" }: Diction
                   <span className="text-3xl font-serif font-bold text-foreground capitalize">
                     {result.word}
                   </span>
-                  {result.phonetic && (
-                    <span className="font-mono text-sm text-primary">
-                      /{result.phonetic.replace(/^\/|\/$/g, "")}/
-                    </span>
-                  )}
+                  <div className="flex flex-wrap items-center gap-2">
+                    {result.phonetic && (
+                      <span className="font-mono text-sm text-primary">
+                        /{result.phonetic.replace(/^\/|\/$/g, "")}/
+                      </span>
+                    )}
+                    {result.spanishTranslation && (
+                      <span className="tag text-xs font-sans font-medium bg-primary/10 text-primary border-primary/20">
+                        {result.spanishTranslation}
+                      </span>
+                    )}
+                  </div>
                 </div>
 
                 <button

@@ -132,9 +132,9 @@ export function GameApp({
           setView("theory")
         }
       } else {
-        void fetchLevelTopics(initialLevel)
         setView("level")
       }
+      void fetchLevelTopics(initialLevel)
     } else if (initialLevel) {
       void fetchLevelTopics(initialLevel)
       setView("level")
@@ -185,6 +185,11 @@ export function GameApp({
         const data = await res.json()
         if (Array.isArray(data.topics) && data.topics.length > 0) {
           setLevelTopics(data.topics)
+          setCurrentTopic((curr) => {
+            if (!curr) return null
+            const updated = data.topics.find((t: TopicDef) => t.slug === curr.slug)
+            return updated || curr
+          })
           return
         }
       }
@@ -736,6 +741,19 @@ export function GameApp({
         <TopicTheory
           level={level}
           topic={currentTopic}
+          isTeacher={user?.role === "teacher"}
+          onTopicUpdated={(updated) => {
+            setCurrentTopic(updated)
+            if (updated.level && updated.level !== level) {
+              setLevel(updated.level)
+              void fetchLevelTopics(updated.level)
+              if (typeof window !== "undefined") {
+                window.history.pushState(null, "", `/${levelToSlug(updated.level)}/${updated.slug}`)
+              }
+            } else {
+              setLevelTopics((prev) => prev.map((t) => (t.slug === updated.slug ? updated : t)))
+            }
+          }}
           onStartPractice={() => void start(level, currentTopic)}
           onBack={() => {
             setView("level")

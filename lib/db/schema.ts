@@ -42,6 +42,7 @@ export const topics = pgTable("topics", {
   title: text("title").notNull(),
   description: text("description"),
   focus: text("focus"),
+  theory: jsonb("theory"),
   enabled: boolean("enabled").notNull().default(true),
   sortOrder: integer("sort_order").notNull().default(0),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

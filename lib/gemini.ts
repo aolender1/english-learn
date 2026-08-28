@@ -175,7 +175,12 @@ function buildPrompt(
   sampleWords: Array<{ english: string; spanish: string }>
 ): string {
   const profile = LEVEL_PROFILES[levelId] ?? LEVEL_PROFILES["pre-a1-starters"]
-  const isPhonetics = topic.slug.includes("phonetics") || topic.slug.includes("pronunciation")
+  const slug = (topic?.slug || "").toLowerCase()
+  const isPhonetics = slug.includes("phonetics") || slug.includes("pronunciation")
+
+  const sampleWordList = sampleWords.slice(0, 15).map((w) => w.english).join(", ")
+  const isYoungLearner =
+    levelId === "pre-a1-starters" || levelId === "a1-movers" || levelId === "a2-flyers"
 
   if (isPhonetics) {
     return `You are a master Cambridge English phonetics author creating practice material for CEFR ${levelCode} (${profile.name}).
@@ -193,7 +198,11 @@ FORMAT REQUIREMENTS:
 - "prompt": The question or sentence with "______".
 - "options": Array of 4 strings.
 - "correct_answer_index": 0, 1, 2, or 3.
-- "explanation": Clear, simple explanation.
+- "explanation": ${
+      isYoungLearner
+        ? "Simple English phonetics tip followed by '🇪🇸 En español: ' explaining the sound in simple Spanish for children."
+        : "Clear, simple explanation of the pronunciation rule."
+    }
 - "word": The target word.
 - "phonetic": IPA pronunciation.
 - "spanish_translation": Spanish translation or sound tip.
@@ -202,9 +211,23 @@ FORMAT REQUIREMENTS:
 Return ONLY a valid JSON array of ${count} objects matching the schema.`
   }
 
-  const sampleWordList = sampleWords.slice(0, 15).map((w) => w.english).join(", ")
+  const explanationInstruction = isYoungLearner
+    ? `4. PEDAGOGICAL EXPLANATION (CRITICAL FOR YOUNG LEARNERS):
+   - Since these students are young children and beginners who are just starting with English, the explanation MUST BE DUAL-LANGUAGE (Simple English rule + Clear Spanish explanation):
+   - Structure: Short English rule sentence, followed by "🇪🇸 En español: " with a simple explanation in Spanish explaining WHY it is correct.
+   - Example: "Use 'is' with singular third-person subjects. 🇪🇸 En español: Usamos 'is' porque 'The cat' es un solo animal."
+   - Example: "Use 'an' before words that start with a vowel sound. 🇪🇸 En español: Usamos 'an' porque 'orange' comienza con sonido de vocal."
+   - Example: "Use 'played' for actions finished in the past. 🇪🇸 En español: Usamos 'played' porque la oración dice 'yesterday' (ayer)."
+   - Keep the Spanish explanation warm, simple, and direct so a beginner child instantly understands.`
+    : `4. PEDAGOGICAL EXPLANATION:
+   - Provide a clear, friendly grammatical explanation in English explaining why the correct option is right and why the other 3 fail the grammar rule.`
 
   return `You are an expert Cambridge English exam author creating practice exercises for CEFR ${levelCode} (${profile.name}).
+${
+  isYoungLearner
+    ? `IMPORTANT: This is for YOUNG LEARNERS (Beginner Children). Every "explanation" MUST be bilingual with an English rule and a Spanish explanation starting with "🇪🇸 En español: ".`
+    : ""
+}
 
 TOPIC DETAILS:
 - Topic Title: "${topic.title}"
@@ -223,8 +246,7 @@ STRICT LEVEL & SENTENCE LENGTH RULES:
 3. FOUR BALANCED OPTIONS:
    - Exactly 4 distinct choices (1 correct answer + 3 realistic distractors representing typical learner mistakes for this level).
 
-4. PEDAGOGICAL EXPLANATION:
-   - Provide a clear, friendly explanation in English of why the correct option is right and why the other 3 fail the grammar rule.
+${explanationInstruction}
 
 5. SAMPLE VOCABULARY TO USE (NATURALLY):
    - ${sampleWordList || "everyday basic vocabulary"}
@@ -233,17 +255,74 @@ STRICT LEVEL & SENTENCE LENGTH RULES:
    - "prompt": The sentence with "______" where the blank goes.
    - "options": Array of 4 strings.
    - "correct_answer_index": Integer (0, 1, 2, or 3).
-   - "explanation": Grammatical explanation.
+   - "explanation": ${
+     isYoungLearner
+       ? "MANDATORY BILINGUAL: Short English rule sentence followed by ' 🇪🇸 En español: ' with a simple Spanish explanation for children."
+       : "Grammatical explanation in English."
+   }
    - "word": The tested word/target item.
    - "phonetic": IPA pronunciation.
    - "spanish_translation": Spanish translation.
    - "difficulty": "easy" or "medium".
+${
+  isYoungLearner
+    ? `
+EXACT FORMAT EXAMPLE (COPY THIS BILINGUAL STRUCTURE FOR EVERY ITEM):
+[
+  {
+    "prompt": "The dog ______ sleeping.",
+    "options": ["is", "am", "are", "be"],
+    "correct_answer_index": 0,
+    "explanation": "Use 'is' with singular nouns like 'the dog'. 🇪🇸 En español: Usamos 'is' porque 'the dog' es un solo animal.",
+    "word": "is",
+    "phonetic": "/ɪz/",
+    "spanish_translation": "está / es",
+    "difficulty": "easy"
+  }
+]
+`
+    : ""
+}
 
 Generate EXACTLY ${count} distinct exercises.
 Return ONLY a valid JSON array of ${count} objects matching the schema.`
 }
 
-async function callGemini(prompt: string, model: string): Promise<unknown> {
+function getResponseSchema(isYoungLearner: boolean) {
+  return {
+    type: "ARRAY",
+    items: {
+      type: "OBJECT",
+      properties: {
+        prompt: { type: "STRING" },
+        options: { type: "ARRAY", items: { type: "STRING" } },
+        correct_answer_index: { type: "INTEGER" },
+        explanation: {
+          type: "STRING",
+          description: isYoungLearner
+            ? "MANDATORY BILINGUAL: English explanation + ' 🇪🇸 En español: ' + Spanish reason."
+            : "Clear pedagogical grammatical explanation in English.",
+        },
+        word: { type: "STRING" },
+        phonetic: { type: "STRING" },
+        spanish_translation: { type: "STRING" },
+        difficulty: { type: "STRING" },
+      },
+      required: [
+        "prompt",
+        "options",
+        "correct_answer_index",
+        "explanation",
+        "word",
+        "phonetic",
+        "spanish_translation",
+        "difficulty",
+      ],
+    },
+  } as const
+}
+
+async function callGemini(prompt: string, model: string, schema?: unknown): Promise<unknown> {
   const key = requireApiKey()
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), 60_000)
@@ -254,9 +333,9 @@ async function callGemini(prompt: string, model: string): Promise<unknown> {
       body: JSON.stringify({
         contents: [{ role: "user", parts: [{ text: prompt }] }],
         generationConfig: {
-          temperature: 0.6,
+          temperature: 0.5,
           responseMimeType: "application/json",
-          responseSchema: RESPONSE_SCHEMA,
+          responseSchema: schema || getResponseSchema(false),
         },
       }),
       signal: controller.signal,
@@ -288,11 +367,23 @@ function validateExercises(raw: unknown): GeneratedExerciseItem[] {
       continue
     }
 
+    let explanation = ""
+    const rawAny = item as Record<string, unknown>
+    if (typeof rawAny.explanation_en === "string" && typeof rawAny.explanation_es === "string") {
+      const en = (rawAny.explanation_en as string).trim()
+      const es = (rawAny.explanation_es as string).trim()
+      explanation = `${en} 🇪🇸 En español: ${es}`
+    } else if (typeof rawAny.explanation === "string") {
+      explanation = (rawAny.explanation as string).trim()
+    } else {
+      explanation = "Correct usage based on Cambridge English rules."
+    }
+
     results.push({
       prompt: item.prompt.replace(/_{2,}/g, "______"),
       options: item.options.map(String),
       correct_answer_index: item.correct_answer_index,
-      explanation: item.explanation || "Correct usage based on Cambridge English rules.",
+      explanation,
       word: item.word || item.options[item.correct_answer_index] || "",
       phonetic: item.phonetic || "",
       spanish_translation: item.spanish_translation || "",
@@ -314,12 +405,15 @@ export async function generateTopicExercises(
 ): Promise<GeneratedExerciseItem[]> {
   const modelsToTry = [EXERCISE_MODEL, ...FALLBACK_MODELS]
   const prompt = buildPrompt(count, levelId, levelCode, topic, sampleWords)
+  const isYoungLearner =
+    levelId === "pre-a1-starters" || levelId === "a1-movers" || levelId === "a2-flyers"
+  const schemaToUse = getResponseSchema(isYoungLearner)
   let lastError: unknown
 
   for (const model of modelsToTry) {
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
-        const raw = await callGemini(prompt, model)
+        const raw = await callGemini(prompt, model, schemaToUse)
         const parsed = validateExercises(raw)
         if (parsed.length > 0) return parsed
         lastError = new Error("Generated exercises failed validation")
