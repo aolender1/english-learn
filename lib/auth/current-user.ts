@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm"
+import { and, eq, or } from "drizzle-orm"
 import { auth } from "@/lib/auth/server"
 import { db } from "@/lib/db"
 import { studentInvitations, teacherStudents, userProfiles } from "@/lib/db/schema"
@@ -57,8 +57,24 @@ export async function getCurrentUser(): Promise<AppUser | null> {
   const userId = session.user.id
   const email = session.user.email.toLowerCase()
 
-  const [existing] = await db.select().from(userProfiles).where(eq(userProfiles.userId, userId)).limit(1)
-  if (existing) return toAppUser(existing)
+  let [existing] = await db
+    .select()
+    .from(userProfiles)
+    .where(or(eq(userProfiles.userId, userId), eq(userProfiles.email, email)))
+    .limit(1)
+
+  if (existing) {
+    if (existing.userId !== userId) {
+      const oldUserId = existing.userId
+      await db.transaction(async (tx) => {
+        await tx.update(userProfiles).set({ userId }).where(eq(userProfiles.email, email))
+        await tx.update(studentInvitations).set({ teacherUserId: userId }).where(eq(studentInvitations.teacherUserId, oldUserId))
+        await tx.update(teacherStudents).set({ teacherUserId: userId }).where(eq(teacherStudents.teacherUserId, oldUserId))
+      })
+      existing.userId = userId
+    }
+    return toAppUser(existing)
+  }
 
   if (TEACHER_EMAILS.has(email)) {
     await db
