@@ -66,7 +66,8 @@ export function AuthForm({ mode }: { mode: Mode }) {
     setError(null)
     setBusy(true)
     try {
-      await authClient.signIn.social({ provider: "google", callbackURL: "/" })
+      const callbackURL = typeof window !== "undefined" ? `${window.location.origin}/` : "/"
+      await authClient.signIn.social({ provider: "google", callbackURL })
     } catch {
       setError("Google sign-in is not available right now.")
       setBusy(false)

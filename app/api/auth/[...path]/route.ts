@@ -30,8 +30,11 @@ async function handle(request: Request, context: { params: Promise<{ path: strin
   const headers = new Headers(request.headers)
   headers.delete("referer")
 
+  // Do not rewrite origin for social sign-in so Better Auth resolves relative
+  // callback URLs and validates callbacks against the application's actual domain.
+  const isSocialSignIn = request.url.includes("/sign-in/social")
   const baseUrl = process.env.NEON_AUTH_BASE_URL
-  if (baseUrl) {
+  if (baseUrl && !isSocialSignIn) {
     try {
       headers.set("origin", new URL(baseUrl).origin)
     } catch {
