@@ -16,8 +16,13 @@ const pool = new Pool({
 })
 
 const API_BASE = "https://generativelanguage.googleapis.com/v1beta"
-const MODEL = "gemini-3.7-flash"
-const FALLBACK_MODEL = "gemini-3.5-flash-lite"
+const aiConfigPath = join(process.cwd(), "config", "ai-models.json")
+const aiConfig = existsSync(aiConfigPath)
+  ? JSON.parse(readFileSync(aiConfigPath, "utf-8"))
+  : null
+
+const MODEL = process.env.GEMINI_HEAVY_MODEL ?? aiConfig?.tasks?.heavy?.primaryModel ?? "gemini-3.8-flash"
+const FALLBACK_MODEL = aiConfig?.tasks?.heavy?.fallbackModels?.[0] ?? "gemini-3.7-flash"
 
 // Load CEFR vocabularies from CSV
 const VOCAB_FILES = {

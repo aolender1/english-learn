@@ -1,0 +1,79 @@
+{
+  "description": "Configuración y mapeo de modelos Gemini en Wordshift según tipo de carga de trabajo",
+  "tasks": {
+    "lightweight": {
+      "id": "lightweight",
+      "name": "Trabajo Liviano / Interactivo",
+      "description": "Generación de ejercicios en tiempo real y en demanda desde el panel de profesores (Teacher Dashboard). Prioriza baja latencia, respuestas rápidas y menor consumo de tokens.",
+      "primaryModel": "gemini-3.5-flash-lite",
+      "fallbackModels": [
+        "gemini-3.1-flash-lite"
+      ],
+      "envOverride": "GEMINI_EXERCISE_MODEL",
+      "temperature": 0.5
+    },
+    "heavy": {
+      "id": "heavy",
+      "name": "Trabajo Pesado / Lotes y Calibración",
+      "description": "Generación masiva por lotes (scripts CLI), calibración estricta de niveles MCER (Pre A1 hasta C2), y análisis gramatical profundo con explicaciones pedagógicas bilingües.",
+      "primaryModel": "gemini-3.8-flash",
+      "fallbackModels": [
+        "gemini-3.7-flash"
+      ],
+      "envOverride": "GEMINI_HEAVY_MODEL",
+      "temperature": 0.4
+    }
+  },
+  "models": {
+    "gemini-3.5-flash-lite": {
+      "id": "gemini-3.5-flash-lite",
+      "name": "Gemini 3.5 Flash-Lite",
+      "tier": "lightweight",
+      "role": "Modelo primario para trabajo liviano en el dashboard de profesores",
+      "description": "Excelente balance de velocidad ultra rápida, alta disponibilidad y coste óptimo para generar ejercicios individuales o tandas pequeñas.",
+      "contextWindow": "1M tokens",
+      "strengths": [
+        "Ultra baja latencia",
+        "Alta tasa de peticiones por minuto (RPM)",
+        "Formateo JSON estricto estructurado"
+      ]
+    },
+    "gemini-3.1-flash-lite": {
+      "id": "gemini-3.1-flash-lite",
+      "name": "Gemini 3.1 Flash-Lite",
+      "tier": "fallback",
+      "role": "Modelo de respaldo para trabajo liviano",
+      "description": "Se utiliza automáticamente como contingencia si el modelo 3.5 alcanza límites de tasa (rate limits) o indisponibilidad temporal.",
+      "contextWindow": "1M tokens",
+      "strengths": [
+        "Alta velocidad",
+        "Estabilidad comprobada"
+      ]
+    },
+    "gemini-3.8-flash": {
+      "id": "gemini-3.8-flash",
+      "name": "Gemini 3.8 Flash",
+      "tier": "heavy",
+      "role": "Modelo primario para tareas pesadas y generación masiva",
+      "description": "Modelo de última generación con capacidad superior de razonamiento, precisión pedagógica en Cambridge English y calibración gramatical rigurosa.",
+      "contextWindow": "1M tokens",
+      "strengths": [
+        "Razonamiento lingüístico avanzado",
+        "Cumplimiento estricto de distores pedagógicos",
+        "Explicaciones bilingües detalladas"
+      ]
+    },
+    "gemini-3.7-flash": {
+      "id": "gemini-3.7-flash",
+      "name": "Gemini 3.7 Flash",
+      "tier": "fallback",
+      "role": "Modelo de respaldo para tareas pesadas",
+      "description": "Alternativa de alta potencia si la versión 3.8 experimenta alta demanda o fallos temporales en lotes grandes.",
+      "contextWindow": "1M tokens",
+      "strengths": [
+        "Alta capacidad de razonamiento",
+        "Excelente coherencia en lotes extensos"
+      ]
+    }
+  }
+}

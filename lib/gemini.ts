@@ -1,12 +1,22 @@
+import aiModelsConfig from "@/config/ai-models.json"
 import type { CefrLevel } from "./question-bank"
 import type { TopicDef } from "./topics"
 
 const API_BASE = "https://generativelanguage.googleapis.com/v1beta"
 
-/** High-quality, primary model for exercise generation */
-export const EXERCISE_MODEL = process.env.GEMINI_EXERCISE_MODEL ?? "gemini-3.7-flash"
-export const FALLBACK_MODELS = ["gemini-3.5-flash-lite", "gemini-3.6-flash", "gemini-3.5-flash"]
-export const HEAVY_MODEL = process.env.GEMINI_HEAVY_MODEL ?? "gemini-3.7-flash"
+export const AI_MODELS_CONFIG = aiModelsConfig
+
+/** Primary model for lightweight/interactive exercise generation */
+export const EXERCISE_MODEL =
+  process.env.GEMINI_EXERCISE_MODEL ?? aiModelsConfig.tasks.lightweight.primaryModel
+export const FALLBACK_MODELS =
+  aiModelsConfig.tasks.lightweight.fallbackModels
+
+/** Primary model for heavy/bulk exercise generation and calibration */
+export const HEAVY_MODEL =
+  process.env.GEMINI_HEAVY_MODEL ?? aiModelsConfig.tasks.heavy.primaryModel
+export const HEAVY_FALLBACK_MODELS =
+  aiModelsConfig.tasks.heavy.fallbackModels
 
 export const PROMPT_VERSION = "v3"
 
