@@ -29,8 +29,9 @@ import {
   Volume2,
   X,
 } from "lucide-react"
-import { cefrLevels, levelLabel, type CefrLevel } from "@/lib/question-bank"
+import { cefrLevels, levelLabel, type CefrLevel, type QuestionMedia } from "@/lib/question-bank"
 import { AudioWordBadge } from "@/components/audio-word-badge"
+import { TeacherMediaPicker } from "@/components/teacher-media-picker"
 import { getDefaultTopicTheoryData, type TopicTheoryData } from "@/lib/topics"
 
 type Tab = "tracking" | "topics" | "exercises" | "invitations"
@@ -125,6 +126,8 @@ type ExerciseItem = {
   expectedAnswer?: string | null
   acceptableAnswers?: string[] | null
   hint?: string | null
+  mediaAssetId?: string | null
+  media?: QuestionMedia | null
   explanation: string
   word: string | null
   phonetic: string | null
@@ -311,6 +314,8 @@ export function TeacherDashboard({ teacherEmail }: { teacherEmail: string }) {
   const [creatingExercise, setCreatingExercise] = useState(false)
   const [editingExercise, setEditingExercise] = useState<ExerciseItem | null>(null)
   const [generatingAi, setGeneratingAi] = useState(false)
+  const [curatingMedia, setCuratingMedia] = useState(false)
+  const [mediaPickerExercise, setMediaPickerExercise] = useState<ExerciseItem | null>(null)
   const [aiCount, setAiCount] = useState(5)
   const [aiMode, setAiMode] = useState<"multiple_choice" | "open_response" | "mixed">("mixed")
   const [aiTier, setAiTier] = useState<"heavy" | "lightweight">("heavy")
@@ -691,6 +696,34 @@ export function TeacherDashboard({ teacherEmail }: { teacherEmail: string }) {
       setMessage({ text: err instanceof Error ? err.message : "AI generation failed", error: true })
     } finally {
       setGeneratingAi(false)
+    }
+  }
+
+  async function curateTopicMedia() {
+    if (!selectedTopicSlug) return
+    setCuratingMedia(true)
+    setMessage(null)
+    try {
+      const res = await fetch("/api/teacher/media/curate", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          topicSlug: selectedTopicSlug,
+          level: exerciseLevel,
+          limit: 8,
+          preferProvider: "auto",
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error ?? "No se pudo ilustrar el topic.")
+      setMessage({
+        text: `✓ ${data.linkedCount} ejercicios ilustrados (${data.uniqueConcepts} conceptos · ${data.klipyCallsUsed} req KLIPY)`,
+      })
+      await fetchExercisesForTopic(selectedTopicSlug, exerciseLevel)
+    } catch (err) {
+      setMessage({ text: err instanceof Error ? err.message : "Error ilustrando el topic.", error: true })
+    } finally {
+      setCuratingMedia(false)
     }
   }
 
@@ -1885,13 +1918,29 @@ export function TeacherDashboard({ teacherEmail }: { teacherEmail: string }) {
 
           {/* Exercise Items List */}
           <div className="flex flex-col gap-3">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-wrap items-center justify-between gap-3">
               <h3 className="text-base font-semibold">
                 Exercises in Bank ({exercisesList.length})
               </h3>
-              <span className="text-xs text-muted-foreground font-mono">
-                Topic: {selectedTopicSlug}
-              </span>
+              <div className="flex flex-wrap items-center gap-2">
+                {exercisesList.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={curateTopicMedia}
+                    disabled={curatingMedia || !selectedTopicSlug}
+                    className="button-secondary py-1 px-3 text-xs flex items-center gap-1.5"
+                    title="Busca visuales (Noto gratis o KLIPY + Decision 1) para hasta 8 ejercicios sin imagen"
+                  >
+                    <ImageIcon size={13} />
+                    {curatingMedia
+                      ? "Ilustrando con Decision 1…"
+                      : "Auto-ilustrar Topic (KLIPY + Decision 1)"}
+                  </button>
+                )}
+                <span className="text-xs text-muted-foreground font-mono">
+                  Topic: {selectedTopicSlug}
+                </span>
+              </div>
             </div>
 
             {loadingExercises ? (
@@ -1930,6 +1979,17 @@ export function TeacherDashboard({ teacherEmail }: { teacherEmail: string }) {
                         </div>
                         <div className="flex items-center gap-1">
                           <button
+                            type="button"
+                            onClick={() => setMediaPickerExercise(ex)}
+                            className={`button-secondary py-1 px-2 text-[11px] flex items-center gap-1 ${
+                              ex.media ? "border-primary/40 text-primary" : ""
+                            }`}
+                            title="Adjuntar o cambiar GIF / animación"
+                          >
+                            <ImageIcon size={12} />
+                            {ex.media ? "Visual ✓" : "Visual"}
+                          </button>
+                          <button
                             onClick={() => {
                               setEditingExercise(ex)
                               setExerciseForm({
@@ -1965,7 +2025,23 @@ export function TeacherDashboard({ teacherEmail }: { teacherEmail: string }) {
                         </div>
                       </div>
 
-                      <p className="font-serif text-lg font-medium">{ex.prompt}</p>
+                      <div className="flex flex-wrap items-start justify-between gap-4">
+                        <p className="font-serif text-lg font-medium flex-1 min-w-0">{ex.prompt}</p>
+                        {ex.media && (
+                          <div className="flex flex-col items-center gap-1 shrink-0 rounded border border-border bg-secondary/30 p-1.5">
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img
+                              src={ex.media.url}
+                              alt={ex.media.altText || ex.media.title || "Visual"}
+                              className="size-14 rounded object-contain bg-card"
+                              loading="lazy"
+                            />
+                            <span className="font-mono text-[9px] uppercase text-muted-foreground">
+                              {ex.media.provider}
+                            </span>
+                          </div>
+                        )}
+                      </div>
 
                       {isOpen ? (
                         <div className="flex flex-col gap-2 rounded border border-primary/25 bg-primary/5 p-3 text-xs">
@@ -2089,6 +2165,36 @@ export function TeacherDashboard({ teacherEmail }: { teacherEmail: string }) {
             )}
           </section>
         </div>
+      )}
+
+      {mediaPickerExercise && (
+        <TeacherMediaPicker
+          exercise={mediaPickerExercise}
+          onClose={() => setMediaPickerExercise(null)}
+          onAttached={(updatedMedia) => {
+            const targetId = mediaPickerExercise.id
+            setExercisesList((prev) =>
+              prev.map((item) =>
+                item.id === targetId
+                  ? {
+                      ...item,
+                      mediaAssetId: updatedMedia?.id ?? null,
+                      media: updatedMedia,
+                    }
+                  : item,
+              ),
+            )
+            setMediaPickerExercise((prev) =>
+              prev
+                ? {
+                    ...prev,
+                    mediaAssetId: updatedMedia?.id ?? null,
+                    media: updatedMedia,
+                  }
+                : null,
+            )
+          }}
+        />
       )}
     </div>
   )

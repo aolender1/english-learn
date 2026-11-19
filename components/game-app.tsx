@@ -46,6 +46,7 @@ import {
 import { TopicTheory } from "@/components/topic-theory"
 import { AudioWordBadge } from "@/components/audio-word-badge"
 import { DictionaryDialog } from "@/components/dictionary-dialog"
+import { ExerciseMediaCard } from "@/components/exercise-media-card"
 
 type View = "home" | "level" | "theory" | "quiz" | "results"
 type AnswerRecord = {
@@ -985,6 +986,7 @@ export function GameApp({
               <h1 className="text-pretty font-serif text-3xl leading-snug md:text-4xl">
                 {current.prompt}
               </h1>
+              {current.media && <ExerciseMediaCard media={current.media} />}
               {useWriteInput && current.hint && (
                 <div className="flex flex-col items-start gap-2">
                   <button

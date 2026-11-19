@@ -113,6 +113,18 @@ export const topic = {
 
 export type ExerciseType = "multiple_choice" | "open_response"
 
+export type QuestionMedia = {
+  id?: string
+  conceptKey: string
+  provider: "klipy" | "noto_emoji" | "custom"
+  mediaType: string
+  url: string
+  previewUrl?: string | null
+  mp4Url?: string | null
+  title?: string | null
+  altText?: string | null
+}
+
 export type Question = {
   id: string
   difficulty: Difficulty
@@ -123,6 +135,7 @@ export type Question = {
   expectedAnswer?: string
   acceptableAnswers?: string[]
   hint?: string
+  media?: QuestionMedia | null
   explanation: string
   /** Optional metadata for backend-generated vocabulary exercises. */
   word?: string

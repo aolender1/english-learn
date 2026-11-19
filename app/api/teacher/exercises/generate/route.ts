@@ -14,6 +14,8 @@ import {
 } from "@/lib/gemini"
 import { cumulativeVocabulary, parseVocabularyCsv, vocabularyFileNames, type VocabularyEntry } from "@/lib/vocabulary"
 import { difficultyForLevel } from "@/lib/practice-server"
+import { findCachedMediaMap, normalizeConceptKey } from "@/lib/media-service"
+import { extractVisualConcept } from "@/lib/noto-emoji"
 
 let vocabCache: Partial<Record<CefrLevel, VocabularyEntry[]>> | null = null
 
@@ -114,8 +116,19 @@ export async function POST(request: Request) {
       return jsonError("AI generation failed to produce valid exercises.", 502)
     }
 
-    const newExercises = result.items.map((item) => {
+    const extractedConcepts = result.items.map((item) => {
+      const expected =
+        item.expected_answer ??
+        (item.exercise_type === "open_response" ? "" : item.options[item.correct_answer_index] ?? "")
+      const concept = extractVisualConcept(item.prompt, item.word, expected)
+      return concept ? normalizeConceptKey(concept) : ""
+    })
+    const cachedMediaMap = await findCachedMediaMap(extractedConcepts)
+
+    const newExercises = result.items.map((item, idx) => {
       const isOpen = item.exercise_type === "open_response"
+      const conceptKey = extractedConcepts[idx]
+      const matchedAsset = conceptKey ? cachedMediaMap.get(conceptKey) : undefined
       return {
         topicSlug: topic.slug,
         level,
@@ -126,6 +139,7 @@ export async function POST(request: Request) {
         expectedAnswer: item.expected_answer ?? (isOpen ? "" : item.options[item.correct_answer_index] ?? ""),
         acceptableAnswers: item.acceptable_answers ?? null,
         hint: item.hint ?? null,
+        mediaAssetId: matchedAsset?.id ?? null,
         explanation: item.explanation,
         word: item.word,
         phonetic: item.phonetic,

@@ -165,8 +165,17 @@ function isExactMatch(
   return false
 }
 
+export type DecisionInputPart =
+  | { type: "text"; text: string }
+  | {
+      type: "image"
+      data: string
+      mime_type: string
+      resolution?: "low" | "medium" | "high"
+    }
+
 export async function callDecisionsApi(
-  input: string,
+  input: string | DecisionInputPart[],
   questions: Record<string, DecisionQuestion>,
 ): Promise<DecisionsApiResponse> {
   const key = requireApiKey()
@@ -516,5 +525,192 @@ export async function auditGeneratedExercises<T extends AuditableExercise>(
       rejected: 0,
       skipped: true,
     }
+  }
+}
+
+export type VisualCandidateInput = {
+  id: string
+  title: string
+  thumbnailUrl: string
+}
+
+export type VisualSelectionResult = {
+  selectedIndex: number | null
+  isRelevantProb: number
+  classroomSafeProb: number
+  clarityScore: number
+  confidence: number
+  latencyMs: number
+  usage?: { inputTokens: number; outputTokens: number }
+}
+
+async function fetchThumbnailBase64(
+  url: string,
+): Promise<{ data: string; mimeType: string } | null> {
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), 6_000)
+  try {
+    const res = await fetch(url, { signal: controller.signal })
+    if (!res.ok) return null
+    const buf = Buffer.from(await res.arrayBuffer())
+    if (buf.length === 0 || buf.length > 4_000_000) return null
+    const rawMime = (res.headers.get("content-type") ?? "image/jpeg").split(";")[0].trim()
+    const mimeType = rawMime.startsWith("image/") ? rawMime : "image/jpeg"
+    return { data: buf.toString("base64"), mimeType }
+  } catch {
+    return null
+  } finally {
+    clearTimeout(timeout)
+  }
+}
+
+/**
+ * Evaluates up to 4 candidate visual thumbnails in ONE multimodal Decision-1 call (0 output tokens)
+ * and selects the clearest, classroom-safe match for an English learning concept.
+ */
+export async function selectBestVisualWithDecision(params: {
+  concept: string
+  promptContext?: string
+  candidates: VisualCandidateInput[]
+}): Promise<VisualSelectionResult> {
+  const slice = params.candidates.slice(0, 4)
+  if (slice.length === 0) {
+    return {
+      selectedIndex: null,
+      isRelevantProb: 0,
+      classroomSafeProb: 0,
+      clarityScore: 0,
+      confidence: 0,
+      latencyMs: 0,
+    }
+  }
+
+  const fetched = await Promise.all(
+    slice.map(async (candidate, origIndex) => {
+      const img = await fetchThumbnailBase64(candidate.thumbnailUrl)
+      return img ? { candidate, origIndex, img } : null
+    }),
+  )
+  const loaded = fetched.filter(
+    (entry): entry is NonNullable<typeof entry> => entry !== null,
+  )
+
+  if (loaded.length === 0) {
+    return {
+      selectedIndex: null,
+      isRelevantProb: 0,
+      classroomSafeProb: 0,
+      clarityScore: 0,
+      confidence: 0,
+      latencyMs: 0,
+    }
+  }
+
+  const inputParts: DecisionInputPart[] = [
+    {
+      type: "text",
+      text: [
+        `Evaluate these ${loaded.length} visual candidates for an English learning exercise.`,
+        `TARGET CONCEPT: "${params.concept}"`,
+        params.promptContext ? `EXERCISE CONTEXT: "${params.promptContext}"` : "",
+        `Goal: pick the cleanest, clearest, family-friendly visual that illustrates "${params.concept}" without distracting text memes or spoilers.`,
+      ]
+        .filter(Boolean)
+        .join("\n"),
+    },
+  ]
+
+  const choiceCriteria: Record<string, string> = {}
+  loaded.forEach((entry, idx) => {
+    const key = `candidate_${idx}`
+    choiceCriteria[key] = `Candidate ${idx} ("${entry.candidate.title || params.concept}") is the best, clearest visual match.`
+    inputParts.push({
+      type: "text",
+      text: `Candidate ${idx} (${key}): "${entry.candidate.title || params.concept}"`,
+    })
+    inputParts.push({
+      type: "image",
+      data: entry.img.data,
+      mime_type: entry.img.mimeType,
+      resolution: "low",
+    })
+  })
+  choiceCriteria.none =
+    "None of the candidates clearly illustrate the concept, or all are distracting/inappropriate."
+
+  const t0 = Date.now()
+  const response = await callDecisionsApi(inputParts, {
+    best_candidate: {
+      type: "choice",
+      instructions: `Which candidate best illustrates "${params.concept}" for an English classroom exercise?`,
+      criteria: choiceCriteria,
+    },
+    is_relevant: {
+      type: "noul",
+      instructions: `Does the strongest candidate clearly represent the English concept "${params.concept}"?`,
+      criteria: {
+        true_description: `Visually depicts "${params.concept}" clearly.`,
+        false_description: "Unrelated, confusing, or mostly text/unrelated meme.",
+      },
+    },
+    classroom_safe: {
+      type: "noul",
+      instructions:
+        "Are the best visual candidates safe and appropriate for students of all ages (including young learners)?",
+      criteria: {
+        true_description: "Family-friendly, clean, appropriate for school.",
+        false_description: "Contains violence, profanity, adult themes, or unsafe imagery.",
+      },
+    },
+    visual_clarity: {
+      type: "score",
+      instructions: "Rate how clear and helpful the best visual candidate is for teaching this concept.",
+      criteria: [
+        "0 - Unrelated, confusing, or text-heavy meme.",
+        "1 - Weak or indirect connection.",
+        "2 - Good visual match for the concept.",
+        "3 - Crystal clear, memorable visual match for English learners.",
+      ],
+    },
+  })
+  const latencyMs = Date.now() - t0
+
+  const bestAns = response.answers?.best_candidate
+  const relAns = response.answers?.is_relevant
+  const safeAns = response.answers?.classroom_safe
+  const clarityAns = response.answers?.visual_clarity
+
+  let selectedIndex: number | null = null
+  if (bestAns?.type === "choice" && bestAns.choice.startsWith("candidate_")) {
+    const idx = Number(bestAns.choice.replace("candidate_", ""))
+    if (Number.isInteger(idx) && loaded[idx]) {
+      selectedIndex = loaded[idx].origIndex
+    }
+  }
+
+  const isRelevantProb = relAns?.type === "noul" ? relAns.noul : 0
+  const classroomSafeProb = safeAns?.type === "noul" ? safeAns.noul : 0
+  const clarityScore =
+    clarityAns?.type === "score" ? Math.round(clarityAns.score * 100) / 100 : 0
+
+  const confidences = [
+    bestAns?.confidence,
+    relAns?.confidence,
+    safeAns?.confidence,
+    clarityAns?.confidence,
+  ].filter((c): c is number => typeof c === "number")
+  const confidence = confidences.length > 0 ? Math.min(...confidences) : 0.5
+
+  return {
+    selectedIndex,
+    isRelevantProb,
+    classroomSafeProb,
+    clarityScore,
+    confidence,
+    latencyMs,
+    usage: {
+      inputTokens: response.usage?.total_input_tokens ?? response.usage?.total_tokens ?? 0,
+      outputTokens: response.usage?.total_output_tokens ?? 0,
+    },
   }
 }

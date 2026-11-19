@@ -5,7 +5,9 @@ import { and, eq } from "drizzle-orm"
 import type { CefrLevel, Difficulty, ExerciseType, Question } from "./question-bank"
 import type { TopicDef } from "./topics"
 import { db } from "@/lib/db"
-import { exercises } from "@/lib/db/schema"
+import { exercises, mediaAssets } from "@/lib/db/schema"
+import { mapMediaRow, type MediaAssetRow } from "@/lib/media-service"
+import { findNotoMatchForExercise } from "@/lib/noto-emoji"
 
 export const SESSION_SIZE = 10
 export type PracticeMode = "mixed" | "open_response" | "multiple_choice"
@@ -37,7 +39,11 @@ export function difficultyForLevel(level: CefrLevel): Difficulty {
 
 type ExerciseRow = typeof exercises.$inferSelect
 
-function mapRowToQuestion(row: ExerciseRow, fallbackLevel: CefrLevel): Question {
+function mapRowToQuestion(
+  row: ExerciseRow,
+  fallbackLevel: CefrLevel,
+  mediaAsset?: MediaAssetRow | null,
+): Question {
   const options = Array.isArray(row.options) ? (row.options as string[]).map(String) : []
   const exerciseType: ExerciseType =
     row.exerciseType === "open_response" || options.length === 0 ? "open_response" : "multiple_choice"
@@ -49,6 +55,11 @@ function mapRowToQuestion(row: ExerciseRow, fallbackLevel: CefrLevel): Question 
     ? (row.acceptableAnswers as unknown[]).map((v) => String(v ?? "").trim()).filter(Boolean)
     : undefined
 
+  const expectedAnswer = row.expectedAnswer?.trim() || options[answerIndex] || undefined
+  const media = mediaAsset
+    ? mapMediaRow(mediaAsset)
+    : findNotoMatchForExercise(row.prompt, row.word, expectedAnswer)
+
   return {
     id: row.id,
     difficulty: (row.difficulty as Difficulty) || difficultyForLevel(fallbackLevel),
@@ -56,21 +67,28 @@ function mapRowToQuestion(row: ExerciseRow, fallbackLevel: CefrLevel): Question 
     prompt: row.prompt,
     options,
     answer: answerIndex,
-    expectedAnswer: row.expectedAnswer?.trim() || options[answerIndex] || undefined,
+    expectedAnswer,
     acceptableAnswers,
     hint: row.hint?.trim() || undefined,
+    media,
     explanation: row.explanation,
     word: row.word ?? undefined,
   }
 }
 
-function selectSessionRows(rows: ExerciseRow[], mode: PracticeMode): ExerciseRow[] {
-  const openRows = rows.filter(
-    (r) => r.exerciseType === "open_response" || !Array.isArray(r.options) || r.options.length === 0,
-  )
-  const mcRows = rows.filter(
-    (r) => r.exerciseType !== "open_response" && Array.isArray(r.options) && r.options.length > 0,
-  )
+function selectSessionRows<T>(
+  rows: T[],
+  getEx: (item: T) => Pick<ExerciseRow, "exerciseType" | "options">,
+  mode: PracticeMode,
+): T[] {
+  const openRows = rows.filter((item) => {
+    const r = getEx(item)
+    return r.exerciseType === "open_response" || !Array.isArray(r.options) || r.options.length === 0
+  })
+  const mcRows = rows.filter((item) => {
+    const r = getEx(item)
+    return r.exerciseType !== "open_response" && Array.isArray(r.options) && r.options.length > 0
+  })
 
   if (mode === "open_response") {
     if (openRows.length > 0) return shuffle(openRows).slice(0, SESSION_SIZE)
@@ -125,13 +143,17 @@ export async function getOrCreateSessionQuestions(
 ): Promise<Question[]> {
   try {
     const rows = await db
-      .select()
+      .select({
+        exercise: exercises,
+        mediaAsset: mediaAssets,
+      })
       .from(exercises)
+      .leftJoin(mediaAssets, eq(exercises.mediaAssetId, mediaAssets.id))
       .where(and(eq(exercises.topicSlug, topic.slug), eq(exercises.level, level)))
 
     if (rows.length > 0) {
-      const picked = selectSessionRows(rows, practiceMode)
-      return picked.map((row) => mapRowToQuestion(row, level))
+      const picked = selectSessionRows(rows, (item) => item.exercise, practiceMode)
+      return picked.map((row) => mapRowToQuestion(row.exercise, level, row.mediaAsset))
     }
   } catch (error) {
     console.error("[practice-server] DB query failed, checking seed backup:", error)
@@ -141,7 +163,7 @@ export async function getOrCreateSessionQuestions(
   const backup = loadBackupSeed()
   const matching = backup.filter((item) => item.topicSlug === topic.slug && item.level === level)
   if (matching.length > 0) {
-    const picked = selectSessionRows(matching, practiceMode)
+    const picked = selectSessionRows(matching, (item) => item, practiceMode)
     return picked.map((row) => mapRowToQuestion(row, level))
   }
 

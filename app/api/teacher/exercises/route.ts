@@ -1,8 +1,9 @@
 import { and, desc, eq } from "drizzle-orm"
 
 import { db } from "@/lib/db"
-import { exercises } from "@/lib/db/schema"
+import { exercises, mediaAssets } from "@/lib/db/schema"
 import { getSessionUser, jsonError } from "@/lib/api-auth"
+import { mapMediaRow } from "@/lib/media-service"
 import type { CefrLevel, Difficulty } from "@/lib/question-bank"
 
 export async function GET(request: Request) {
@@ -20,11 +21,20 @@ export async function GET(request: Request) {
   }
 
   try {
-    const list = await db
-      .select()
+    const rows = await db
+      .select({
+        exercise: exercises,
+        mediaAsset: mediaAssets,
+      })
       .from(exercises)
+      .leftJoin(mediaAssets, eq(exercises.mediaAssetId, mediaAssets.id))
       .where(and(eq(exercises.topicSlug, topicSlug), eq(exercises.level, level)))
       .orderBy(desc(exercises.createdAt))
+
+    const list = rows.map((row) => ({
+      ...row.exercise,
+      media: row.mediaAsset ? mapMediaRow(row.mediaAsset) : null,
+    }))
 
     return Response.json({ exercises: list })
   } catch (error) {

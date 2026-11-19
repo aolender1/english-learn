@@ -52,6 +52,28 @@ export const topics = pgTable("topics", {
   index("idx_topics_level").on(table.level),
 ])
 
+export const mediaAssets = pgTable("media_assets", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  conceptKey: text("concept_key").notNull().unique(),
+  provider: text("provider").notNull(),
+  mediaType: text("media_type").notNull(),
+  externalId: text("external_id"),
+  url: text("url").notNull(),
+  previewUrl: text("preview_url"),
+  mp4Url: text("mp4_url"),
+  title: text("title"),
+  altText: text("alt_text"),
+  width: integer("width"),
+  height: integer("height"),
+  decisionScore: integer("decision_score"),
+  decisionMeta: jsonb("decision_meta"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  check("media_assets_provider_check", sql`${table.provider} in ('klipy', 'noto_emoji', 'custom')`),
+  index("idx_media_assets_provider").on(table.provider),
+])
+
 export const exercises = pgTable("exercises", {
   id: uuid("id").primaryKey().defaultRandom(),
   topicSlug: text("topic_slug").notNull(),
@@ -63,6 +85,7 @@ export const exercises = pgTable("exercises", {
   expectedAnswer: text("expected_answer"),
   acceptableAnswers: jsonb("acceptable_answers"),
   hint: text("hint"),
+  mediaAssetId: uuid("media_asset_id").references(() => mediaAssets.id, { onDelete: "set null" }),
   explanation: text("explanation").notNull(),
   word: text("word"),
   phonetic: text("phonetic"),
@@ -76,6 +99,7 @@ export const exercises = pgTable("exercises", {
   index("idx_exercises_topic_level").on(table.topicSlug, table.level),
   index("idx_exercises_word").on(table.word),
   index("idx_exercises_type").on(table.exerciseType),
+  index("idx_exercises_media_asset").on(table.mediaAssetId),
 ])
 
 export const exerciseCache = pgTable("exercise_cache", {
