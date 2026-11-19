@@ -7,6 +7,7 @@
       "description": "Generación rápida bajo demanda desde el Teacher Dashboard y explicaciones breves de errores para estudiantes. Prioriza baja latencia y mínimo costo.",
       "primaryModel": "gemini-3.5-flash-lite",
       "fallbackModels": [
+        "gemini-3.1-flash-lite",
         "gemini-4-hydrogen",
         "gemini-3.8-flash"
       ],
@@ -20,7 +21,8 @@
       "primaryModel": "gemini-4-hydrogen",
       "fallbackModels": [
         "gemini-3.8-flash",
-        "gemini-3.5-flash-lite"
+        "gemini-3.5-flash-lite",
+        "gemini-3.1-flash-lite"
       ],
       "envOverride": "GEMINI_HEAVY_MODEL",
       "thinkingLevel": "LOW",

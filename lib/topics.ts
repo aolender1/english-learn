@@ -20,6 +20,7 @@ export type TopicDef = {
   focus: string
   theory?: TopicTheoryData | null
   enabled?: boolean
+  exerciseCount?: number
 }
 
 export const topicCatalog: TopicDef[] = [

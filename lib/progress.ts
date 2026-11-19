@@ -97,15 +97,15 @@ export function loadActiveSession(): ActiveSession | null {
   if (typeof window === "undefined") return null
   try {
     const current = JSON.parse(window.localStorage.getItem(SESSION_KEY) ?? "null") as ActiveSession | null
-    if (current?.level && Array.isArray(current.questions)) return current
+    if (current?.level && Array.isArray(current.questions) && current.questions.length > 0) return current
     const v2 = JSON.parse(window.localStorage.getItem(V2_SESSION_KEY) ?? "null") as V2Session | null
-    if (v2?.level && Array.isArray(v2.questions)) {
+    if (v2?.level && Array.isArray(v2.questions) && v2.questions.length > 0) {
       const migrated = { ...v2, level: oldLevel(v2.level) }
       saveActiveSession(migrated)
       return migrated
     }
     const legacy = JSON.parse(window.localStorage.getItem(LEGACY_SESSION_KEY) ?? "null") as LegacySession | null
-    if (!legacy?.difficulty || !Array.isArray(legacy.questions)) return null
+    if (!legacy?.difficulty || !Array.isArray(legacy.questions) || legacy.questions.length === 0) return null
     const migrated = { ...legacy, level: legacyLevel(legacy.difficulty), topicId: "reported-speech" }
     saveActiveSession(migrated)
     return migrated

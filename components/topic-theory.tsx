@@ -30,6 +30,7 @@ type TopicTheoryProps = {
   isTeacher?: boolean
   onTopicUpdated?: (updatedTopic: TopicDef) => void
   starting?: boolean
+  sessionError?: string | null
 }
 
 export function TopicTheory({
@@ -40,6 +41,7 @@ export function TopicTheory({
   isTeacher = false,
   onTopicUpdated,
   starting = false,
+  sessionError = null,
 }: TopicTheoryProps) {
   const [editing, setEditing] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -622,6 +624,23 @@ export function TopicTheory({
                 ))}
               </div>
             </section>
+          )}
+
+          {sessionError && (
+            <div
+              role="alert"
+              className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-lg border border-amber-500/40 bg-amber-50 p-4 text-sm text-amber-950"
+            >
+              <span>{sessionError}</span>
+              {isTeacher && (
+                <a
+                  href="/teacher"
+                  className="button-secondary py-1.5 px-3 text-xs font-semibold shrink-0"
+                >
+                  Ir al Teacher Panel
+                </a>
+              )}
+            </div>
           )}
 
           {/* Bottom CTA Bar */}

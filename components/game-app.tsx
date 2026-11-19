@@ -129,6 +129,7 @@ export function GameApp({
   const [userLoaded, setUserLoaded] = useState(false)
   const [roundId, setRoundId] = useState<string | null>(null)
   const [starting, setStarting] = useState(false)
+  const [sessionError, setSessionError] = useState<string | null>(null)
   const [currentTopic, setCurrentTopic] = useState<TopicDef | null>(null)
   const [levelTopics, setLevelTopics] = useState<TopicDef[]>([])
   const [topicSearch, setTopicSearch] = useState("")
@@ -256,6 +257,7 @@ export function GameApp({
   function openLevel(next: CefrLevel, updateUrl = true) {
     setLevel(next)
     setTopicSearch("")
+    setSessionError(null)
     void fetchLevelTopics(next)
     setView("level")
     setMenuOpen(false)
@@ -266,6 +268,7 @@ export function GameApp({
 
   function openTopicTheory(topic: TopicDef, updateUrl = true) {
     setCurrentTopic(topic)
+    setSessionError(null)
     setView("theory")
     if (updateUrl && typeof window !== "undefined") {
       window.history.pushState(null, "", `/${levelToSlug(level)}/${topic.slug}`)
@@ -291,6 +294,7 @@ export function GameApp({
 
   async function start(levelId: CefrLevel, chosenTopic?: TopicDef, updateUrl = true) {
     setStarting(true)
+    setSessionError(null)
     const activeTopic = chosenTopic || currentTopic || levelTopics[0] || topicCatalog.find((t) => t.level === levelId) || {
       slug: "general-practice",
       level: levelId,
@@ -347,10 +351,21 @@ export function GameApp({
       setStarting(false)
     }
 
-    // 2. Fallback to questions generator
+    // 2. Fallback to static questions bank only if available for this level
     const questions = shuffle(questionsForLevel(levelId)).slice(0, 10).map(prepare)
+    if (questions.length === 0) {
+      clearActiveSession()
+      setSession([])
+      setRoundId(null)
+      setSessionError(
+        `El tema "${activeTopic.title}" todavía no tiene ejercicios cargados en la base de datos. Generá ejercicios desde el Teacher Panel o probá un tema con ejercicios disponibles.`,
+      )
+      setView("theory")
+      return
+    }
+
     setLevel(levelId)
-    setSession(questions.length > 0 ? questions : [])
+    setSession(questions)
     setIndex(0)
     resetQuestionState()
     setAnswers([])
@@ -889,7 +904,13 @@ export function GameApp({
                       </div>
 
                       <div className="mt-2 flex items-center justify-between border-t border-border/60 pt-4">
-                        <span className="tag text-xs">Ver teoría y práctica</span>
+                        <span className="tag text-xs">
+                          {typeof item.exerciseCount === "number"
+                            ? item.exerciseCount > 0
+                              ? `${item.exerciseCount} ejercicios`
+                              : "Solo teoría (sin ejercicios aún)"
+                            : "Ver teoría y práctica"}
+                        </span>
                         <span className="button-primary py-1 px-3 text-xs font-semibold flex items-center gap-1 group-hover:bg-primary/90">
                           Acceder <ArrowRight size={13} />
                         </span>
@@ -923,13 +944,38 @@ export function GameApp({
           }}
           onStartPractice={() => void start(level, currentTopic)}
           onBack={() => {
+            setSessionError(null)
             setView("level")
             if (typeof window !== "undefined") {
               window.history.pushState(null, "", `/${levelToSlug(level)}`)
             }
           }}
           starting={starting}
+          sessionError={sessionError}
         />
+      )}
+
+      {view === "quiz" && !current && (
+        <div className="mx-auto flex max-w-2xl flex-col gap-5 px-5 py-16 text-center items-center">
+          <p className="eyebrow">{levelLabel(level)}</p>
+          <h1 className="font-serif text-3xl">No hay ejercicios disponibles para este tema</h1>
+          <p className="text-sm text-muted-foreground">
+            Todavía no se cargaron ejercicios para <strong>{currentTopic?.title || "este tema"}</strong>.
+          </p>
+          <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
+            <button className="button-secondary" onClick={() => setView("theory")}>
+              <ArrowLeft size={16} /> Volver a la teoría
+            </button>
+            <button className="button-secondary" onClick={() => setView("level")}>
+              Ver todos los temas
+            </button>
+            {user?.role === "teacher" && (
+              <a href="/teacher" className="button-primary">
+                Generar ejercicios en Teacher Panel
+              </a>
+            )}
+          </div>
+        </div>
       )}
 
       {view === "quiz" && current && (

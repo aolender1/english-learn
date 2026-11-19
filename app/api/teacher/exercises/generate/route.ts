@@ -17,6 +17,8 @@ import { difficultyForLevel } from "@/lib/practice-server"
 import { findCachedMediaMap, normalizeConceptKey } from "@/lib/media-service"
 import { extractVisualConcept } from "@/lib/noto-emoji"
 
+export const maxDuration = 60
+
 let vocabCache: Partial<Record<CefrLevel, VocabularyEntry[]>> | null = null
 
 function getLoadedVocab(): Partial<Record<CefrLevel, VocabularyEntry[]>> {

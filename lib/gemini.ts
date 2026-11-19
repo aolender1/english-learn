@@ -418,11 +418,12 @@ async function callGemini(
     temperature?: number
     thinkingLevel?: ThinkingLevel
     json?: boolean
+    timeoutMs?: number
   },
 ): Promise<unknown> {
   const key = requireApiKey()
   const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), 60_000)
+  const timeout = setTimeout(() => controller.abort(), options?.timeoutMs ?? 25_000)
 
   const generationConfig: Record<string, unknown> = {
     temperature: options?.temperature ?? 0.5,
@@ -477,23 +478,39 @@ async function callGemini(
 
 async function callWithFallback<T>(
   modelsToTry: string[],
-  runner: (model: string) => Promise<T>,
+  runner: (model: string, ctx: { isLastModel: boolean; timeoutMs: number }) => Promise<T>,
 ): Promise<{ result: T; modelUsed: string }> {
   let lastError: unknown
+  const deadlineAt = Date.now() + 45_000
 
-  for (const model of modelsToTry) {
-    for (let attempt = 0; attempt < 2; attempt++) {
+  for (let i = 0; i < modelsToTry.length; i++) {
+    const model = modelsToTry[i]
+    const isLastModel = i === modelsToTry.length - 1
+    const remainingBudget = Math.max(8_000, deadlineAt - Date.now())
+    const preferredTimeout = isLastModel
+      ? 22_000
+      : model.startsWith("gemini-4-") || model === "gemini-3.8-flash"
+      ? 10_000
+      : 14_000
+    const timeoutMs = Math.min(preferredTimeout, remainingBudget)
+    const maxAttempts = isLastModel ? 2 : 1
+
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
       try {
-        const result = await runner(model)
+        const result = await runner(model, { isLastModel, timeoutMs })
         return { result, modelUsed: model }
       } catch (error) {
         lastError = error
-        if (error instanceof TransientGeminiError) {
-          if (attempt === 0) {
-            await new Promise((resolve) => setTimeout(resolve, 1200))
-            continue
-          }
-          // Move immediately to next fallback model after 2 transient failures
+        const isTransient =
+          error instanceof TransientGeminiError ||
+          (error instanceof Error && error.name === "AbortError")
+        if (isTransient && !isLastModel) {
+          // Immediately fail over to the next healthy model instead of stalling on a 503/timeout
+          break
+        }
+        if (attempt + 1 < maxAttempts && Date.now() + 6_000 < deadlineAt) {
+          await new Promise((resolve) => setTimeout(resolve, 800))
+        } else {
           break
         }
       }
@@ -620,11 +637,12 @@ async function generateSingleBatch(params: {
   const schema =
     kind === "open_response" ? getOpenResponseSchema() : getMultipleChoiceSchema(isYoungLearner)
 
-  const { result, modelUsed } = await callWithFallback(modelsToTry, async (model) => {
+  const { result, modelUsed } = await callWithFallback(modelsToTry, async (model, { timeoutMs }) => {
     const raw = await callGemini(prompt, model, {
       schema,
       temperature: kind === "open_response" ? 0.55 : 0.5,
       thinkingLevel: "LOW",
+      timeoutMs,
     })
     const parsed =
       kind === "open_response" ? validateOpenExercises(raw) : validateMultipleChoiceExercises(raw)
@@ -780,11 +798,12 @@ Write a concise, clear explanation in Spanish (2 to 4 short sentences max, plain
 2. Explains the grammar/vocabulary rule simply so they don't repeat it.
 3. Shows the exact corrected English phrase clearly.`
 
-  const { result, modelUsed } = await callWithFallback(modelsToTry, async (model) => {
+  const { result, modelUsed } = await callWithFallback(modelsToTry, async (model, { timeoutMs }) => {
     const text = await callGemini(tutorPrompt, model, {
       json: false,
       temperature: 0.3,
       thinkingLevel: "LOW",
+      timeoutMs,
     })
     return String(text).trim()
   })

@@ -13,6 +13,8 @@ import type { CefrLevel } from "@/lib/question-bank"
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
+export const maxDuration = 60
+
 export async function POST(request: Request) {
   const user = await getSessionUser()
   if (!user || user.role !== "teacher") {
