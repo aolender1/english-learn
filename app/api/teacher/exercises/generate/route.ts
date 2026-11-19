@@ -7,7 +7,11 @@ import { exercises, topics as topicsTable } from "@/lib/db/schema"
 import { getSessionUser, jsonError } from "@/lib/api-auth"
 import { cefrLevels, type CefrLevel } from "@/lib/question-bank"
 import { findTopic } from "@/lib/topics"
-import { generateTopicExercises } from "@/lib/gemini"
+import {
+  generateTopicExercisesDetailed,
+  type ExerciseGenMode,
+  type ExerciseGenTier,
+} from "@/lib/gemini"
 import { cumulativeVocabulary, parseVocabularyCsv, vocabularyFileNames, type VocabularyEntry } from "@/lib/vocabulary"
 import { difficultyForLevel } from "@/lib/practice-server"
 
@@ -48,12 +52,25 @@ export async function POST(request: Request) {
     topicSlug?: string
     level?: string
     count?: number
+    mode?: string
+    tier?: string
+    runQa?: boolean
   }
   try {
     body = await request.json()
   } catch {
     return jsonError("Invalid JSON body.", 400)
   }
+
+  const mode: ExerciseGenMode =
+    body.mode === "open_response" || body.mode === "mixed" ? body.mode : "multiple_choice"
+  const tier: ExerciseGenTier =
+    body.tier === "lightweight" || body.tier === "heavy"
+      ? body.tier
+      : mode === "multiple_choice"
+      ? "lightweight"
+      : "heavy"
+  const runQa = body.runQa !== false
 
   const level = cefrLevels.find((item) => item.id === body.level)?.id
   if (!level) return jsonError("Unknown CEFR level.", 400)
@@ -84,25 +101,31 @@ export async function POST(request: Request) {
     const pickedWords = shuffle(vocabList).slice(0, 20)
     const levelCode = cefrLevels.find((item) => item.id === level)?.code ?? level
 
-    const generated = await generateTopicExercises(
+    const result = await generateTopicExercisesDetailed(
       count,
       level,
       levelCode,
       topic,
-      pickedWords.map((w) => ({ english: w.english, spanish: w.spanish }))
+      pickedWords.map((w) => ({ english: w.english, spanish: w.spanish })),
+      { mode, tier, runQa },
     )
 
-    if (generated.length === 0) {
+    if (result.items.length === 0) {
       return jsonError("AI generation failed to produce valid exercises.", 502)
     }
 
-    const newExercises = generated.map((item) => {
+    const newExercises = result.items.map((item) => {
+      const isOpen = item.exercise_type === "open_response"
       return {
         topicSlug: topic.slug,
         level,
+        exerciseType: item.exercise_type,
         prompt: item.prompt,
-        options: item.options,
-        correctAnswerIndex: item.correct_answer_index,
+        options: isOpen ? [] : item.options,
+        correctAnswerIndex: isOpen ? 0 : item.correct_answer_index,
+        expectedAnswer: item.expected_answer ?? (isOpen ? "" : item.options[item.correct_answer_index] ?? ""),
+        acceptableAnswers: item.acceptable_answers ?? null,
+        hint: item.hint ?? null,
         explanation: item.explanation,
         word: item.word,
         phonetic: item.phonetic,
@@ -118,6 +141,8 @@ export async function POST(request: Request) {
       success: true,
       count: inserted.length,
       exercises: inserted,
+      modelUsed: result.modelUsed,
+      qa: result.qa,
     })
   } catch (error) {
     console.error("[api/teacher/exercises/generate POST]", error)

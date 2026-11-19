@@ -9,12 +9,18 @@ import {
   BookA,
   BookOpen,
   Check,
+  HelpCircle,
   Home,
+  Keyboard,
+  ListChecks,
+  Loader2,
   Lock,
   LogOut,
   Menu,
+  MessageSquareMore,
   RotateCcw,
   Search,
+  Send,
   ShieldCheck,
   Sparkles,
   Trophy,
@@ -23,6 +29,7 @@ import {
 } from "lucide-react"
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import { authClient } from "@/lib/auth/client"
+import type { DecisionEvaluation } from "@/lib/gemini-decisions"
 import { cefrLevels, hasTopics, levelLabel, levelToSlug, questionsForLevel, resolveLevelSlug, type CefrLevel, type LevelBand, type Question } from "@/lib/question-bank"
 import { resolveTopicSlug, topicCatalog, topicsForLevel, type TopicDef } from "@/lib/topics"
 import {
@@ -41,7 +48,13 @@ import { AudioWordBadge } from "@/components/audio-word-badge"
 import { DictionaryDialog } from "@/components/dictionary-dialog"
 
 type View = "home" | "level" | "theory" | "quiz" | "results"
-type AnswerRecord = { question: Question; selected: number; correct: boolean }
+type AnswerRecord = {
+  question: Question
+  selected: number
+  correct: boolean
+  typedAnswer?: string
+  evaluation?: DecisionEvaluation
+}
 type SessionUser = { id: string; email: string; name: string | null; role: "teacher" | "student" }
 
 const ROUND_KEY = "wordshift-active-round-id"
@@ -57,8 +70,23 @@ function shuffle<T>(items: T[]) {
 }
 
 function prepare(question: Question): Question {
+  if (question.exerciseType === "open_response" || question.options.length === 0) {
+    return {
+      ...question,
+      exerciseType: "open_response",
+      options: [],
+      answer: 0,
+    }
+  }
   const options = shuffle(question.options.map((text, index) => ({ text, correct: index === question.answer })))
-  return { ...question, options: options.map((item) => item.text), answer: options.findIndex((item) => item.correct) }
+  const answer = options.findIndex((item) => item.correct)
+  return {
+    ...question,
+    exerciseType: question.exerciseType ?? "multiple_choice",
+    options: options.map((item) => item.text),
+    answer,
+    expectedAnswer: question.expectedAnswer || options[answer]?.text,
+  }
 }
 
 function Stat({ label, value }: { label: string; value: string }) {
@@ -109,6 +137,17 @@ export function GameApp({
   const [dictOpen, setDictOpen] = useState(false)
   const [dictQuery, setDictQuery] = useState("")
 
+  // Open-ended / Decision-1 practice state
+  const [inputMode, setInputMode] = useState<"options" | "write">("options")
+  const [typedAnswer, setTypedAnswer] = useState("")
+  const [evaluating, setEvaluating] = useState(false)
+  const [evalError, setEvalError] = useState<string | null>(null)
+  const [currentEvaluation, setCurrentEvaluation] = useState<DecisionEvaluation | null>(null)
+  const [showHint, setShowHint] = useState(false)
+  const [aiExplanation, setAiExplanation] = useState<string | null>(null)
+  const [loadingAiExplanation, setLoadingAiExplanation] = useState(false)
+  const [questionStartedAt, setQuestionStartedAt] = useState<number>(() => Date.now())
+
   useEffect(() => {
     setProgress(loadProgress())
 
@@ -144,8 +183,16 @@ export function GameApp({
         setLevel(saved.level)
         setSession(saved.questions)
         setIndex(saved.index)
-        setSelected(saved.selected)
         setAnswers(saved.answers)
+        const restoredAnswer = saved.answers[saved.index]
+        if (restoredAnswer?.evaluation) {
+          setSelected(null)
+          setCurrentEvaluation(restoredAnswer.evaluation)
+          setTypedAnswer(restoredAnswer.typedAnswer ?? "")
+          setInputMode("write")
+        } else {
+          setSelected(saved.selected === -1 ? null : saved.selected)
+        }
         const matching = topicCatalog.find((t) => t.slug === saved.topicId && t.level === saved.level)
         if (matching) setCurrentTopic(matching)
         setView("quiz")
@@ -172,6 +219,10 @@ export function GameApp({
   }, [initialLevel, initialTopicSlug, initialView])
 
   const current = session[index]
+  const isNativeOpen = current ? current.exerciseType === "open_response" || current.options.length === 0 : false
+  const useWriteInput = isNativeOpen || inputMode === "write"
+  const isAnswered = selected !== null || currentEvaluation !== null
+  const expectedModelAnswer = current ? current.expectedAnswer || current.options[current.answer] || "" : ""
   const score = answers.filter((answer) => answer.correct).length
   const levelInfo = cefrLevels.find((item) => item.id === level) || cefrLevels[0]
   const totalBest = Math.max(...Object.values(progress.bestScores))
@@ -225,6 +276,18 @@ export function GameApp({
     setStatsOpen(true)
   }
 
+  function resetQuestionState() {
+    setSelected(null)
+    setTypedAnswer("")
+    setEvaluating(false)
+    setEvalError(null)
+    setCurrentEvaluation(null)
+    setShowHint(false)
+    setAiExplanation(null)
+    setLoadingAiExplanation(false)
+    setQuestionStartedAt(Date.now())
+  }
+
   async function start(levelId: CefrLevel, chosenTopic?: TopicDef, updateUrl = true) {
     setStarting(true)
     const activeTopic = chosenTopic || currentTopic || levelTopics[0] || topicCatalog.find((t) => t.level === levelId) || {
@@ -255,7 +318,7 @@ export function GameApp({
           setLevel(levelId)
           setSession(questions)
           setIndex(0)
-          setSelected(null)
+          resetQuestionState()
           setAnswers([])
           setRoundId(data.roundId ?? null)
           try {
@@ -288,7 +351,7 @@ export function GameApp({
     setLevel(levelId)
     setSession(questions.length > 0 ? questions : [])
     setIndex(0)
-    setSelected(null)
+    resetQuestionState()
     setAnswers([])
     setRoundId(null)
     try {
@@ -309,9 +372,10 @@ export function GameApp({
   }
 
   function choose(option: number) {
-    if (selected !== null || !current) return
+    if (selected !== null || currentEvaluation !== null || !current) return
     const correct = option === current.answer
-    const nextAnswers = [...answers, { question: current, selected: option, correct }]
+    const nextAnswers: AnswerRecord[] = [...answers, { question: current, selected: option, correct }]
+    const elapsedMs = Math.max(0, Date.now() - questionStartedAt)
     setSelected(option)
     setAnswers(nextAnswers)
     saveActiveSession({
@@ -332,8 +396,109 @@ export function GameApp({
           selectedAnswer: current.options[option],
           correctAnswer: current.options[current.answer],
           isCorrect: correct,
+          responseTimeMs: elapsedMs,
         }),
       }).catch(() => {})
+    }
+  }
+
+  async function submitOpenAnswer(event?: React.FormEvent) {
+    event?.preventDefault()
+    if (!current || evaluating || currentEvaluation !== null || selected !== null) return
+    const cleaned = typedAnswer.trim()
+    if (!cleaned) return
+
+    const expected = current.expectedAnswer || current.options[current.answer] || ""
+    const elapsedMs = Math.max(0, Date.now() - questionStartedAt)
+    setEvaluating(true)
+    setEvalError(null)
+
+    try {
+      const response = await fetch("/api/practice/evaluate", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          roundId,
+          exerciseId: current.id,
+          prompt: current.prompt,
+          expectedAnswer: expected,
+          acceptableAnswers: current.acceptableAnswers,
+          studentAnswer: cleaned,
+          level,
+          topicSlug: currentTopic?.slug ?? "general",
+          responseTimeMs: elapsedMs,
+        }),
+      })
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok || !data.evaluation) {
+        throw new Error(data.error ?? "No pudimos evaluar tu respuesta.")
+      }
+
+      const evaluation = data.evaluation as DecisionEvaluation
+      setCurrentEvaluation(evaluation)
+      const nextAnswers: AnswerRecord[] = [
+        ...answers,
+        {
+          question: current,
+          selected: -1,
+          correct: evaluation.isCorrect,
+          typedAnswer: cleaned,
+          evaluation,
+        },
+      ]
+      setAnswers(nextAnswers)
+      saveActiveSession({
+        level,
+        topicId: currentTopic?.slug ?? "general",
+        questions: session,
+        index,
+        selected: -1,
+        answers: nextAnswers,
+      })
+    } catch (error) {
+      setEvalError(
+        error instanceof Error ? error.message : "Error al evaluar con IA. Reintentá en unos segundos.",
+      )
+    } finally {
+      setEvaluating(false)
+    }
+  }
+
+  async function requestAiExplanation() {
+    if (!current || loadingAiExplanation || aiExplanation) return
+    const expected = current.expectedAnswer || current.options[current.answer] || ""
+    const studentText =
+      typedAnswer.trim() || (selected !== null ? current.options[selected] ?? "" : "")
+    if (!expected || !studentText) return
+
+    setLoadingAiExplanation(true)
+    setEvalError(null)
+    try {
+      const response = await fetch("/api/practice/explain", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          prompt: current.prompt,
+          expectedAnswer: expected,
+          studentAnswer: studentText,
+          level,
+          topicTitle: currentTopic?.title ?? currentTopic?.slug ?? "English Practice",
+          topicFocus: currentTopic?.focus,
+          errorCategory: currentEvaluation?.errorLabelEs,
+          score: currentEvaluation?.score,
+        }),
+      })
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok || !data.explanation) {
+        throw new Error(data.error ?? "No se pudo generar la explicación.")
+      }
+      setAiExplanation(data.explanation)
+    } catch (error) {
+      setEvalError(
+        error instanceof Error ? error.message : "No se pudo cargar la explicación con IA.",
+      )
+    } finally {
+      setLoadingAiExplanation(false)
     }
   }
 
@@ -341,7 +506,7 @@ export function GameApp({
     if (index < session.length - 1) {
       const nextIndex = index + 1
       setIndex(nextIndex)
-      setSelected(null)
+      resetQuestionState()
       saveActiveSession({
         level,
         topicId: currentTopic?.slug ?? "general",
@@ -388,6 +553,7 @@ export function GameApp({
         250
       )
     }
+    resetQuestionState()
     setView("results")
   }
 
@@ -401,7 +567,7 @@ export function GameApp({
     }
     setRoundId(null)
     setView("home")
-    setSelected(null)
+    resetQuestionState()
     setAnswers([])
     setMenuOpen(false)
     if (typeof window !== "undefined") {
@@ -785,6 +951,7 @@ export function GameApp({
                 }
                 setRoundId(null)
                 clearActiveSession()
+                resetQuestionState()
                 setView("theory")
               }}
             >
@@ -812,63 +979,340 @@ export function GameApp({
 
           <section className="grid gap-8 md:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)] md:gap-12">
             <div className="flex flex-col gap-5 border-t border-border pt-6">
-              <p className="eyebrow">Complete the sentence</p>
+              <p className="eyebrow">
+                {isNativeOpen ? "Write your answer" : useWriteInput ? "Modo Escritura · IA" : "Complete the sentence"}
+              </p>
               <h1 className="text-pretty font-serif text-3xl leading-snug md:text-4xl">
                 {current.prompt}
               </h1>
+              {useWriteInput && current.hint && (
+                <div className="flex flex-col items-start gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowHint((prev) => !prev)}
+                    className="inline-flex items-center gap-1.5 text-xs font-medium text-primary hover:underline"
+                  >
+                    <HelpCircle size={14} aria-hidden="true" />
+                    {showHint ? "Ocultar pista" : "Ver pista"}
+                  </button>
+                  {showHint && (
+                    <p className="text-xs leading-relaxed text-muted-foreground border-l-2 border-primary/50 bg-secondary/50 px-3 py-2 rounded-r">
+                      {current.hint}
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
 
-            <div className="flex flex-col gap-3" role="group" aria-label="Answer choices">
-              <p className="mb-1 text-sm font-medium text-muted-foreground">Select the correct option:</p>
-              {current.options.map((option, optionIndex) => {
-                const state =
-                  selected === null
-                    ? "idle"
-                    : optionIndex === current.answer
-                    ? "correct"
-                    : optionIndex === selected
-                    ? "wrong"
-                    : "muted"
-                return (
-                  <button
-                    key={`${optionIndex}-${option}`}
-                    onClick={() => choose(optionIndex)}
-                    disabled={selected !== null}
-                    className={`answer answer-${state} group`}
-                    aria-label={`Option ${String.fromCharCode(65 + optionIndex)}: ${option}`}
-                  >
-                    <span className="answer-key" aria-hidden="true">
-                      {String.fromCharCode(65 + optionIndex)}
-                    </span>
-                    <span className="flex-1 text-left">{option}</span>
-                    {state === "idle" && <ArrowRight className="shrink-0 text-muted-foreground" size={18} aria-hidden="true" />}
-                    {state === "correct" && <Check className="shrink-0 text-primary" size={18} aria-hidden="true" />}
-                    {state === "wrong" && <X className="shrink-0 text-destructive" size={18} aria-hidden="true" />}
-                  </button>
-                )
-              })}
+            <div className="flex flex-col gap-3" role="group" aria-label="Answer area">
+              <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
+                <p className="text-sm font-medium text-muted-foreground">
+                  {useWriteInput ? "Escribí tu respuesta en inglés:" : "Select the correct option:"}
+                </p>
 
-              {selected !== null && (
-                <div className="mt-4 flex flex-col gap-4 border-l-2 border-primary bg-secondary/80 p-5 rounded-r">
-                  <div>
-                    <p className={`font-semibold ${selected === current.answer ? "text-primary" : "text-destructive"}`}>
-                      {selected === current.answer ? "✓ Correct!" : "✗ Not quite."}
-                    </p>
-                    <p className="mt-1 text-sm leading-relaxed text-foreground whitespace-pre-line">
-                      {current.explanation}
-                    </p>
-                    {current.word && (
-                      <div className="mt-3 pt-3 border-t border-border/60 flex items-center gap-2">
-                        <span className="text-xs text-muted-foreground">Pronunciation:</span>
-                        <AudioWordBadge word={current.word} />
+                {!isNativeOpen ? (
+                  <div
+                    className="inline-flex items-center rounded border border-border bg-secondary/70 p-0.5 text-xs"
+                    role="tablist"
+                    aria-label="Answer input mode"
+                  >
+                    <button
+                      type="button"
+                      disabled={isAnswered}
+                      onClick={() => {
+                        setInputMode("options")
+                        setEvalError(null)
+                      }}
+                      className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-sm font-medium transition-colors ${
+                        !useWriteInput
+                          ? "bg-card text-foreground shadow-xs"
+                          : "text-muted-foreground hover:text-foreground"
+                      } disabled:opacity-60`}
+                    >
+                      <ListChecks size={13} aria-hidden="true" />
+                      Opciones
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isAnswered}
+                      onClick={() => {
+                        setInputMode("write")
+                        setEvalError(null)
+                      }}
+                      className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-sm font-medium transition-colors ${
+                        useWriteInput
+                          ? "bg-card text-primary shadow-xs"
+                          : "text-muted-foreground hover:text-foreground"
+                      } disabled:opacity-60`}
+                    >
+                      <Keyboard size={13} aria-hidden="true" />
+                      Modo Escritura (IA)
+                    </button>
+                  </div>
+                ) : (
+                  <span className="tag text-[10px] font-mono">
+                    Respuesta abierta · Decision 1
+                  </span>
+                )}
+              </div>
+
+              {!useWriteInput ? (
+                <>
+                  {current.options.map((option, optionIndex) => {
+                    const state =
+                      selected === null
+                        ? "idle"
+                        : optionIndex === current.answer
+                        ? "correct"
+                        : optionIndex === selected
+                        ? "wrong"
+                        : "muted"
+                    return (
+                      <button
+                        key={`${optionIndex}-${option}`}
+                        onClick={() => choose(optionIndex)}
+                        disabled={selected !== null}
+                        className={`answer answer-${state} group`}
+                        aria-label={`Option ${String.fromCharCode(65 + optionIndex)}: ${option}`}
+                      >
+                        <span className="answer-key" aria-hidden="true">
+                          {String.fromCharCode(65 + optionIndex)}
+                        </span>
+                        <span className="flex-1 text-left">{option}</span>
+                        {state === "idle" && <ArrowRight className="shrink-0 text-muted-foreground" size={18} aria-hidden="true" />}
+                        {state === "correct" && <Check className="shrink-0 text-primary" size={18} aria-hidden="true" />}
+                        {state === "wrong" && <X className="shrink-0 text-destructive" size={18} aria-hidden="true" />}
+                      </button>
+                    )
+                  })}
+
+                  {selected !== null && (
+                    <div className="mt-4 flex flex-col gap-4 border-l-2 border-primary bg-secondary/80 p-5 rounded-r">
+                      <div>
+                        <p className={`font-semibold ${selected === current.answer ? "text-primary" : "text-destructive"}`}>
+                          {selected === current.answer ? "✓ Correct!" : "✗ Not quite."}
+                        </p>
+                        <p className="mt-1 text-sm leading-relaxed text-foreground whitespace-pre-line">
+                          {current.explanation}
+                        </p>
+                        {selected !== current.answer && !aiExplanation && (
+                          <button
+                            type="button"
+                            onClick={requestAiExplanation}
+                            disabled={loadingAiExplanation}
+                            className="mt-3 inline-flex items-center gap-1.5 text-xs font-semibold text-primary hover:underline disabled:opacity-60"
+                          >
+                            {loadingAiExplanation ? (
+                              <>
+                                <Loader2 size={13} className="animate-spin" aria-hidden="true" />
+                                Generando explicación personalizada…
+                              </>
+                            ) : (
+                              <>
+                                <MessageSquareMore size={13} aria-hidden="true" />
+                                Explicame mi error con IA
+                              </>
+                            )}
+                          </button>
+                        )}
+                        {aiExplanation && (
+                          <div className="mt-3 rounded border border-primary/25 bg-card p-3 text-xs leading-relaxed text-foreground">
+                            <p className="font-semibold text-primary mb-1 flex items-center gap-1.5">
+                              <Sparkles size={12} aria-hidden="true" /> Tutor IA
+                            </p>
+                            <p>{aiExplanation}</p>
+                          </div>
+                        )}
+                        {current.word && (
+                          <div className="mt-3 pt-3 border-t border-border/60 flex items-center gap-2">
+                            <span className="text-xs text-muted-foreground">Pronunciation:</span>
+                            <AudioWordBadge word={current.word} />
+                          </div>
+                        )}
+                      </div>
+                      <button className="button-primary self-start mt-1" onClick={next}>
+                        {index === session.length - 1 ? "See results" : "Next question"}
+                        <ArrowRight size={16} aria-hidden="true" />
+                      </button>
+                    </div>
+                  )}
+                </>
+              ) : (
+                <>
+                  <form onSubmit={submitOpenAnswer} className="flex flex-col gap-3">
+                    {current.prompt.includes("______") && (
+                      <p className="text-xs text-muted-foreground">
+                        Podés escribir solo la parte que falta o la oración completa en inglés.
+                      </p>
+                    )}
+                    <textarea
+                      rows={2}
+                      value={typedAnswer}
+                      onChange={(e) => setTypedAnswer(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && !e.shiftKey) {
+                          e.preventDefault()
+                          void submitOpenAnswer()
+                        }
+                      }}
+                      disabled={isAnswered || evaluating}
+                      maxLength={500}
+                      placeholder="Type your English answer here..."
+                      className="input-field min-h-20 resize-none p-3.5 text-base font-medium leading-relaxed"
+                      aria-label="Your English answer"
+                    />
+                    {!currentEvaluation && (
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-[11px] font-mono text-muted-foreground">
+                          Enter para enviar · Shift+Enter salto de línea
+                        </span>
+                        <button
+                          type="submit"
+                          disabled={!typedAnswer.trim() || evaluating}
+                          className="button-primary"
+                        >
+                          {evaluating ? (
+                            <>
+                              <Loader2 size={16} className="animate-spin" aria-hidden="true" />
+                              Evaluando…
+                            </>
+                          ) : (
+                            <>
+                              <Send size={15} aria-hidden="true" />
+                              Evaluar con IA
+                            </>
+                          )}
+                        </button>
                       </div>
                     )}
-                  </div>
-                  <button className="button-primary self-start mt-1" onClick={next}>
-                    {index === session.length - 1 ? "See results" : "Next question"}
-                    <ArrowRight size={16} aria-hidden="true" />
-                  </button>
-                </div>
+                  </form>
+
+                  {evalError && (
+                    <div
+                      role="alert"
+                      className="border border-destructive/40 bg-destructive/10 p-3 text-xs text-destructive"
+                    >
+                      {evalError}
+                    </div>
+                  )}
+
+                  {currentEvaluation && (
+                    <div
+                      aria-live="polite"
+                      className={`mt-2 flex flex-col gap-4 border-l-2 bg-secondary/80 p-5 rounded-r ${
+                        currentEvaluation.verdict === "correct"
+                          ? "border-primary"
+                          : currentEvaluation.verdict === "almost"
+                          ? "border-amber-600"
+                          : "border-destructive"
+                      }`}
+                    >
+                      <div className="flex flex-col gap-2">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <p
+                            className={`font-semibold ${
+                              currentEvaluation.verdict === "correct"
+                                ? "text-primary"
+                                : currentEvaluation.verdict === "almost"
+                                ? "text-amber-700"
+                                : "text-destructive"
+                            }`}
+                          >
+                            {currentEvaluation.verdict === "correct"
+                              ? "✓ ¡Correcto!"
+                              : currentEvaluation.verdict === "almost"
+                              ? "≈ ¡Casi perfecto!"
+                              : "✗ Revisá este detalle"}
+                          </p>
+
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <span className="tag text-[10px] font-mono">
+                              Puntaje: {currentEvaluation.score.toFixed(1)} / 3.0
+                            </span>
+                            {currentEvaluation.errorCategory !== "none" && (
+                              <span className="tag text-[10px] font-mono">
+                                {currentEvaluation.errorLabelEs}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        <p className="text-[11px] font-mono text-muted-foreground">
+                          {currentEvaluation.source === "exact"
+                            ? "Coincidencia exacta · 0 ms"
+                            : `Decision 1 · Confianza ${Math.round(currentEvaluation.confidence * 100)}% · ${currentEvaluation.latencyMs} ms · 0 tokens salida`}
+                        </p>
+                      </div>
+
+                      {(currentEvaluation.source !== "exact" || !currentEvaluation.isCorrect) && (
+                        <div className="grid gap-2 rounded border border-border bg-card p-3 text-xs">
+                          <div>
+                            <span className="font-semibold text-muted-foreground">Tu respuesta: </span>
+                            <span className="font-medium text-foreground">{typedAnswer}</span>
+                          </div>
+                          <div>
+                            <span className="font-semibold text-primary">Respuesta modelo: </span>
+                            <span className="font-medium text-foreground">{expectedModelAnswer}</span>
+                          </div>
+                          {current.acceptableAnswers && current.acceptableAnswers.length > 0 && (
+                            <div className="text-[11px] text-muted-foreground">
+                              También válido: {current.acceptableAnswers.slice(0, 2).join(" / ")}
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      <div className="flex flex-col gap-1.5 text-sm leading-relaxed text-foreground">
+                        <p className="font-medium">{currentEvaluation.errorTipEs}</p>
+                        <p className="text-xs text-muted-foreground whitespace-pre-line">
+                          {current.explanation}
+                        </p>
+                      </div>
+
+                      {currentEvaluation.needsAiExplanation && !aiExplanation && (
+                        <button
+                          type="button"
+                          onClick={requestAiExplanation}
+                          disabled={loadingAiExplanation}
+                          className="inline-flex items-center gap-1.5 self-start text-xs font-semibold text-primary hover:underline disabled:opacity-60"
+                        >
+                          {loadingAiExplanation ? (
+                            <>
+                              <Loader2 size={13} className="animate-spin" aria-hidden="true" />
+                              Generando explicación personalizada…
+                            </>
+                          ) : (
+                            <>
+                              <MessageSquareMore size={13} aria-hidden="true" />
+                              Explicame mi error con IA
+                            </>
+                          )}
+                        </button>
+                      )}
+
+                      {aiExplanation && (
+                        <div className="rounded border border-primary/25 bg-card p-3 text-xs leading-relaxed text-foreground">
+                          <p className="font-semibold text-primary mb-1 flex items-center gap-1.5">
+                            <Sparkles size={12} aria-hidden="true" /> Explicación del tutor IA
+                          </p>
+                          <p>{aiExplanation}</p>
+                        </div>
+                      )}
+
+                      {current.word && (
+                        <div className="pt-2 border-t border-border/60 flex items-center gap-2">
+                          <span className="text-xs text-muted-foreground">Pronunciation:</span>
+                          <AudioWordBadge word={current.word} />
+                        </div>
+                      )}
+
+                      <button className="button-primary self-start mt-1" onClick={next}>
+                        {index === session.length - 1 ? "See results" : "Next question"}
+                        <ArrowRight size={16} aria-hidden="true" />
+                      </button>
+                    </div>
+                  )}
+                </>
               )}
             </div>
           </section>
@@ -906,26 +1350,42 @@ export function GameApp({
               <h2 className="text-xl font-semibold">Mistakes & Explanations</h2>
               {answers
                 .filter((item) => !item.correct)
-                .map((item, i) => (
-                  <div key={item.question.id || i} className="grid gap-2 border-t border-border py-4 md:grid-cols-[2rem_1fr_1fr]">
-                    <span className="font-mono text-xs text-muted-foreground">{String(i + 1).padStart(2, "0")}</span>
-                    <p className="font-serif text-lg">{item.question.prompt}</p>
-                    <div className="text-sm leading-relaxed text-muted-foreground">
-                      <p className="text-destructive">
-                        <strong>Your answer:</strong> {item.question.options[item.selected]}
-                      </p>
-                      <p className="text-foreground mt-1">
-                        <strong>Correct:</strong> {item.question.options[item.question.answer]}
-                      </p>
-                      <p className="text-xs text-muted-foreground mt-1 whitespace-pre-line">{item.question.explanation}</p>
-                      {item.question.word && (
-                        <div className="mt-2">
-                          <AudioWordBadge word={item.question.word} />
-                        </div>
-                      )}
+                .map((item, i) => {
+                  const userAnswerText =
+                    item.typedAnswer ?? item.question.options[item.selected] ?? "—"
+                  const correctAnswerText =
+                    item.question.expectedAnswer ?? item.question.options[item.question.answer] ?? "—"
+                  return (
+                    <div key={item.question.id || i} className="grid gap-2 border-t border-border py-4 md:grid-cols-[2rem_1fr_1fr]">
+                      <span className="font-mono text-xs text-muted-foreground">{String(i + 1).padStart(2, "0")}</span>
+                      <p className="font-serif text-lg">{item.question.prompt}</p>
+                      <div className="text-sm leading-relaxed text-muted-foreground">
+                        {item.evaluation && (
+                          <div className="mb-1.5 flex flex-wrap gap-1.5">
+                            <span className="tag text-[10px] font-mono">
+                              {item.evaluation.errorLabelEs}
+                            </span>
+                            <span className="tag text-[10px] font-mono">
+                              {item.evaluation.score.toFixed(1)}/3
+                            </span>
+                          </div>
+                        )}
+                        <p className="text-destructive">
+                          <strong>Your answer:</strong> {userAnswerText}
+                        </p>
+                        <p className="text-foreground mt-1">
+                          <strong>Correct:</strong> {correctAnswerText}
+                        </p>
+                        <p className="text-xs text-muted-foreground mt-1 whitespace-pre-line">{item.question.explanation}</p>
+                        {item.question.word && (
+                          <div className="mt-2">
+                            <AudioWordBadge word={item.question.word} />
+                          </div>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  )
+                })}
             </section>
           )}
 

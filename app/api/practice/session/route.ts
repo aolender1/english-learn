@@ -3,19 +3,24 @@ import { and, eq } from "drizzle-orm"
 import { db } from "@/lib/db"
 import { practiceRounds, topics as topicsTable } from "@/lib/db/schema"
 import { getSessionUser, jsonError } from "@/lib/api-auth"
-import { SESSION_SIZE, getOrCreateSessionQuestions } from "@/lib/practice-server"
+import { SESSION_SIZE, getOrCreateSessionQuestions, type PracticeMode } from "@/lib/practice-server"
 import { cefrLevels, type CefrLevel } from "@/lib/question-bank"
 import { findTopic } from "@/lib/topics"
 
 export async function POST(request: Request) {
   const user = await getSessionUser().catch(() => null)
 
-  let body: { level?: string; topicSlug?: string }
+  let body: { level?: string; topicSlug?: string; practiceMode?: string }
   try {
     body = await request.json()
   } catch {
     return jsonError("Invalid JSON body.", 400)
   }
+
+  const practiceMode: PracticeMode =
+    body.practiceMode === "open_response" || body.practiceMode === "multiple_choice"
+      ? body.practiceMode
+      : "mixed"
 
   const level = cefrLevels.find((item) => item.id === body.level)?.id
   if (!level) return jsonError("Unknown CEFR level.", 400)
@@ -41,7 +46,7 @@ export async function POST(request: Request) {
   if (!topic) return jsonError(`No practice topic is available for ${level} yet.`, 404)
 
   try {
-    const exercises = await getOrCreateSessionQuestions(level, topic)
+    const exercises = await getOrCreateSessionQuestions(level, topic, practiceMode)
     if (exercises.length === 0) {
       return jsonError("Could not prepare exercises for this topic. Try again.", 502)
     }

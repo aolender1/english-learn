@@ -1,3 +1,4 @@
+import type { DecisionEvaluation } from "./gemini-decisions"
 import type { CefrLevel, Difficulty, Question } from "./question-bank"
 
 export type HistoryEntry = { id: string; level: CefrLevel; topicId: string; score: number; total: number; date: string }
@@ -10,7 +11,13 @@ export type Progress = {
   bestScores: Record<CefrLevel, number>
   history: HistoryEntry[]
 }
-export type SavedAnswer = { question: Question; selected: number; correct: boolean }
+export type SavedAnswer = {
+  question: Question
+  selected: number
+  correct: boolean
+  typedAnswer?: string
+  evaluation?: DecisionEvaluation
+}
 export type ActiveSession = { level: CefrLevel; topicId: string; questions: Question[]; index: number; selected: number | null; answers: SavedAnswer[] }
 
 type OldLevel = "A1" | "A2" | "B1" | "B2" | "C1" | "C2"

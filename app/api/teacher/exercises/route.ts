@@ -42,9 +42,13 @@ export async function POST(request: Request) {
   let body: {
     topicSlug?: string
     level?: string
+    exerciseType?: string
     prompt?: string
     options?: string[]
     correctAnswerIndex?: number
+    expectedAnswer?: string
+    acceptableAnswers?: string[]
+    hint?: string
     explanation?: string
     word?: string
     phonetic?: string
@@ -57,10 +61,17 @@ export async function POST(request: Request) {
     return jsonError("Invalid JSON body.", 400)
   }
 
-  if (
-    !body.topicSlug ||
-    !body.level ||
-    !body.prompt ||
+  const exerciseType = body.exerciseType === "open_response" ? "open_response" : "multiple_choice"
+
+  if (!body.topicSlug || !body.level || !body.prompt?.trim()) {
+    return jsonError("Missing required fields.", 400)
+  }
+
+  if (exerciseType === "open_response") {
+    if (!body.expectedAnswer?.trim()) {
+      return jsonError("Expected answer is required for open-response exercises.", 400)
+    }
+  } else if (
     !Array.isArray(body.options) ||
     body.options.length < 2 ||
     typeof body.correctAnswerIndex !== "number" ||
@@ -70,15 +81,27 @@ export async function POST(request: Request) {
     return jsonError("Missing required fields or invalid options/answer index.", 400)
   }
 
+  const cleanOptions = exerciseType === "open_response" ? [] : (body.options ?? []).map(String)
+  const cleanIndex = exerciseType === "open_response" ? 0 : body.correctAnswerIndex ?? 0
+  const cleanAcceptable = Array.isArray(body.acceptableAnswers)
+    ? body.acceptableAnswers.map((v) => String(v ?? "").trim()).filter(Boolean)
+    : null
+
   try {
     const [inserted] = await db
       .insert(exercises)
       .values({
         topicSlug: body.topicSlug,
         level: body.level as CefrLevel,
+        exerciseType,
         prompt: body.prompt.trim(),
-        options: body.options.map(String),
-        correctAnswerIndex: body.correctAnswerIndex,
+        options: cleanOptions,
+        correctAnswerIndex: cleanIndex,
+        expectedAnswer:
+          body.expectedAnswer?.trim() ||
+          (exerciseType === "multiple_choice" ? cleanOptions[cleanIndex] ?? null : null),
+        acceptableAnswers: cleanAcceptable,
+        hint: body.hint?.trim() || null,
         explanation: body.explanation?.trim() ?? "",
         word: body.word?.trim() ?? null,
         phonetic: body.phonetic?.trim() ?? null,
@@ -103,9 +126,13 @@ export async function PUT(request: Request) {
 
   let body: {
     id?: string
+    exerciseType?: string
     prompt?: string
     options?: string[]
     correctAnswerIndex?: number
+    expectedAnswer?: string
+    acceptableAnswers?: string[]
+    hint?: string
     explanation?: string
     word?: string
     phonetic?: string
@@ -126,9 +153,28 @@ export async function PUT(request: Request) {
     const updateData: Partial<typeof exercises.$inferInsert> = {
       updatedAt: new Date(),
     }
+    if (body.exerciseType === "open_response" || body.exerciseType === "multiple_choice") {
+      updateData.exerciseType = body.exerciseType
+    }
     if (body.prompt !== undefined) updateData.prompt = body.prompt.trim()
-    if (Array.isArray(body.options)) updateData.options = body.options.map(String)
-    if (typeof body.correctAnswerIndex === "number") updateData.correctAnswerIndex = body.correctAnswerIndex
+    if (body.exerciseType === "open_response") {
+      updateData.options = []
+      updateData.correctAnswerIndex = 0
+    } else if (Array.isArray(body.options)) {
+      updateData.options = body.options.map(String)
+    }
+    if (body.exerciseType !== "open_response" && typeof body.correctAnswerIndex === "number") {
+      updateData.correctAnswerIndex = body.correctAnswerIndex
+    }
+    if (body.expectedAnswer !== undefined) {
+      updateData.expectedAnswer = body.expectedAnswer.trim() || null
+    }
+    if (Array.isArray(body.acceptableAnswers)) {
+      updateData.acceptableAnswers = body.acceptableAnswers
+        .map((v) => String(v ?? "").trim())
+        .filter(Boolean)
+    }
+    if (body.hint !== undefined) updateData.hint = body.hint.trim() || null
     if (body.explanation !== undefined) updateData.explanation = body.explanation.trim()
     if (body.word !== undefined) updateData.word = body.word.trim()
     if (body.phonetic !== undefined) updateData.phonetic = body.phonetic.trim()

@@ -1,4 +1,5 @@
 import aiModelsConfig from "@/config/ai-models.json"
+import { auditGeneratedExercises } from "./gemini-decisions"
 import type { CefrLevel } from "./question-bank"
 import type { TopicDef } from "./topics"
 
@@ -6,7 +7,7 @@ const API_BASE = "https://generativelanguage.googleapis.com/v1beta"
 
 export const AI_MODELS_CONFIG = aiModelsConfig
 
-/** Primary model for lightweight/interactive exercise generation */
+/** Primary model for lightweight/interactive exercise generation and brief explanations */
 export const EXERCISE_MODEL =
   process.env.GEMINI_EXERCISE_MODEL ?? aiModelsConfig.tasks.lightweight.primaryModel
 export const FALLBACK_MODELS =
@@ -18,17 +19,45 @@ export const HEAVY_MODEL =
 export const HEAVY_FALLBACK_MODELS =
   aiModelsConfig.tasks.heavy.fallbackModels
 
-export const PROMPT_VERSION = "v3"
+export const PROMPT_VERSION = "v4"
+
+export type ExerciseGenMode = "multiple_choice" | "open_response" | "mixed"
+export type ExerciseGenTier = "lightweight" | "heavy"
+export type ThinkingLevel = "LOW" | "MEDIUM" | "HIGH" | "XHIGH"
 
 export type GeneratedExerciseItem = {
+  exercise_type: "multiple_choice" | "open_response"
   prompt: string
   options: string[]
   correct_answer_index: number
+  expected_answer?: string
+  acceptable_answers?: string[]
+  hint?: string
   explanation: string
   word: string
   phonetic: string
   spanish_translation: string
   difficulty: "easy" | "medium" | "hard"
+}
+
+export type ExerciseGenerationResult = {
+  items: GeneratedExerciseItem[]
+  modelUsed: string
+  qa: {
+    checked: number
+    passed: number
+    rejected: number
+    skipped: boolean
+  }
+}
+
+class TransientGeminiError extends Error {
+  status: number
+  constructor(message: string, status: number) {
+    super(message)
+    this.name = "TransientGeminiError"
+    this.status = status
+  }
 }
 
 function requireApiKey() {
@@ -39,7 +68,7 @@ function requireApiKey() {
 
 type GeminiResponse = {
   candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>
-  error?: { message?: string }
+  error?: { code?: number; message?: string; status?: string }
 }
 
 const LEVEL_PROFILES: Record<
@@ -150,39 +179,12 @@ const LEVEL_PROFILES: Record<
   },
 }
 
-const RESPONSE_SCHEMA = {
-  type: "ARRAY",
-  items: {
-    type: "OBJECT",
-    properties: {
-      prompt: { type: "STRING" },
-      options: { type: "ARRAY", items: { type: "STRING" } },
-      correct_answer_index: { type: "INTEGER" },
-      explanation: { type: "STRING" },
-      word: { type: "STRING" },
-      phonetic: { type: "STRING" },
-      spanish_translation: { type: "STRING" },
-      difficulty: { type: "STRING" },
-    },
-    required: [
-      "prompt",
-      "options",
-      "correct_answer_index",
-      "explanation",
-      "word",
-      "phonetic",
-      "spanish_translation",
-      "difficulty",
-    ],
-  },
-} as const
-
-function buildPrompt(
+function buildMultipleChoicePrompt(
   count: number,
   levelId: CefrLevel,
   levelCode: string,
   topic: TopicDef,
-  sampleWords: Array<{ english: string; spanish: string }>
+  sampleWords: Array<{ english: string; spanish: string }>,
 ): string {
   const profile = LEVEL_PROFILES[levelId] ?? LEVEL_PROFILES["pre-a1-starters"]
   const slug = (topic?.slug || "").toLowerCase()
@@ -274,31 +276,66 @@ ${explanationInstruction}
    - "phonetic": IPA pronunciation.
    - "spanish_translation": Spanish translation.
    - "difficulty": "easy" or "medium".
-${
-  isYoungLearner
-    ? `
-EXACT FORMAT EXAMPLE (COPY THIS BILINGUAL STRUCTURE FOR EVERY ITEM):
-[
-  {
-    "prompt": "The dog ______ sleeping.",
-    "options": ["is", "am", "are", "be"],
-    "correct_answer_index": 0,
-    "explanation": "Use 'is' with singular nouns like 'the dog'. 🇪🇸 En español: Usamos 'is' porque 'the dog' es un solo animal.",
-    "word": "is",
-    "phonetic": "/ɪz/",
-    "spanish_translation": "está / es",
-    "difficulty": "easy"
-  }
-]
-`
-    : ""
-}
 
 Generate EXACTLY ${count} distinct exercises.
 Return ONLY a valid JSON array of ${count} objects matching the schema.`
 }
 
-function getResponseSchema(isYoungLearner: boolean) {
+function buildOpenResponsePrompt(
+  count: number,
+  levelId: CefrLevel,
+  levelCode: string,
+  topic: TopicDef,
+  sampleWords: Array<{ english: string; spanish: string }>,
+): string {
+  const profile = LEVEL_PROFILES[levelId] ?? LEVEL_PROFILES["pre-a1-starters"]
+  const sampleWordList = sampleWords.slice(0, 15).map((w) => `${w.english} (${w.spanish})`).join(", ")
+  const isYoungLearner =
+    levelId === "pre-a1-starters" || levelId === "a1-movers" || levelId === "a2-flyers"
+
+  return `You are an expert Cambridge English author designing interactive OPEN-ENDED WRITING exercises for Spanish-speaking learners at CEFR ${levelCode} (${profile.name}).
+
+TOPIC DETAILS:
+- Topic Title: "${topic.title}"
+- Grammatical Focus: "${topic.focus}"
+- Description: "${topic.description}"
+- Level: CEFR ${levelCode} (${profile.name})
+- Target Audience: ${profile.ageGroup}
+
+STRICT LEVEL & LENGTH RULES:
+- ${profile.sentenceLength}.
+- ${profile.syntaxRules}
+
+TASK:
+Create EXACTLY ${count} varied open-response exercises (NO multiple-choice options) that force active English production around "${topic.focus}".
+Alternate naturally across these 3 formats:
+1. Sentence transformation / rewrite (e.g., 'Rewrite in past simple: "Tom plays football every day." (Use: yesterday)' or 'Report this: Mia said, "I am tired."').
+2. Spanish → English translation (e.g., 'Traducí al inglés: "Ayer jugamos al fútbol en el parque."').
+3. Open fill-in-the-blank with cue in parentheses (e.g., 'Yesterday, Tom ______ (play) football in the park.'). Note: use "______" ONLY when asking to fill a single missing word/verb form with a clear cue in parentheses.
+
+REQUIREMENTS FOR EVERY ITEM:
+- "prompt": Clear instruction + sentence in English (or Spanish if translation). Never include A/B/C/D options.
+- "expected_answer": The best canonical English response (for blanks, ONLY the missing word/phrase; for translations/rewrites, the full English sentence).
+- "acceptable_answers": Array of 2 to 3 valid alternative English answers (e.g., contractions like "don't" vs "do not", optional "that", or full sentence when prompt has "______").
+- "hint": A concise, helpful hint in Spanish (max 12 words) that nudges without giving away the answer.
+- "explanation": ${
+    isYoungLearner
+      ? "MANDATORY BILINGUAL: Short English rule sentence followed by ' 🇪🇸 En español: ' with a warm, simple Spanish explanation."
+      : "Clear grammatical explanation in English plus a short ' 🇪🇸 En español: ' note on the key rule."
+  }
+- "word": Key English target word or structure tested.
+- "phonetic": IPA pronunciation of the key word.
+- "spanish_translation": Spanish translation of the target sentence or word.
+- "difficulty": "easy", "medium", or "hard".
+
+SAMPLE VOCABULARY TO WEAVE IN NATURALLY:
+- ${sampleWordList || "everyday useful vocabulary"}
+
+Generate EXACTLY ${count} distinct open-ended exercises.
+Return ONLY a valid JSON array matching the schema.`
+}
+
+function getMultipleChoiceSchema(isYoungLearner: boolean) {
   return {
     type: "ARRAY",
     items: {
@@ -332,37 +369,144 @@ function getResponseSchema(isYoungLearner: boolean) {
   } as const
 }
 
-async function callGemini(prompt: string, model: string, schema?: unknown): Promise<unknown> {
+function getOpenResponseSchema() {
+  return {
+    type: "ARRAY",
+    items: {
+      type: "OBJECT",
+      properties: {
+        prompt: { type: "STRING" },
+        expected_answer: { type: "STRING" },
+        acceptable_answers: { type: "ARRAY", items: { type: "STRING" } },
+        hint: { type: "STRING" },
+        explanation: { type: "STRING" },
+        word: { type: "STRING" },
+        phonetic: { type: "STRING" },
+        spanish_translation: { type: "STRING" },
+        difficulty: { type: "STRING" },
+      },
+      required: [
+        "prompt",
+        "expected_answer",
+        "acceptable_answers",
+        "hint",
+        "explanation",
+        "word",
+        "phonetic",
+        "spanish_translation",
+        "difficulty",
+      ],
+    },
+  } as const
+}
+
+function resolveModelChain(tier: ExerciseGenTier): string[] {
+  const primary = tier === "heavy" ? HEAVY_MODEL : EXERCISE_MODEL
+  const fallbacks =
+    tier === "heavy"
+      ? [...HEAVY_FALLBACK_MODELS, EXERCISE_MODEL, ...FALLBACK_MODELS]
+      : [...FALLBACK_MODELS, HEAVY_MODEL, ...HEAVY_FALLBACK_MODELS]
+
+  return Array.from(new Set([primary, ...fallbacks].filter(Boolean)))
+}
+
+async function callGemini(
+  prompt: string,
+  model: string,
+  options?: {
+    schema?: unknown
+    temperature?: number
+    thinkingLevel?: ThinkingLevel
+    json?: boolean
+  },
+): Promise<unknown> {
   const key = requireApiKey()
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), 60_000)
+
+  const generationConfig: Record<string, unknown> = {
+    temperature: options?.temperature ?? 0.5,
+  }
+
+  if (options?.json !== false) {
+    generationConfig.responseMimeType = "application/json"
+    if (options?.schema) {
+      generationConfig.responseSchema = options.schema
+    }
+  }
+
+  // Gemini 4 models use thinkingLevel (LOW/MEDIUM/HIGH/XHIGH), never thinkingBudget
+  if (model.startsWith("gemini-4-")) {
+    generationConfig.thinkingConfig = {
+      thinkingLevel: options?.thinkingLevel ?? "LOW",
+    }
+  }
+
   try {
-    const response = await fetch(`${API_BASE}/models/${model}:generateContent?key=${key}`, {
+    const response = await fetch(`${API_BASE}/models/${model}:generateContent`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: {
+        "x-goog-api-key": key,
+        "content-type": "application/json",
+      },
       body: JSON.stringify({
         contents: [{ role: "user", parts: [{ text: prompt }] }],
-        generationConfig: {
-          temperature: 0.5,
-          responseMimeType: "application/json",
-          responseSchema: schema || getResponseSchema(false),
-        },
+        generationConfig,
       }),
       signal: controller.signal,
     })
+
     const data = (await response.json()) as GeminiResponse
-    if (!response.ok) throw new Error(data.error?.message ?? `Gemini API error (${response.status})`)
-    const text = data.candidates?.[0]?.content?.parts?.map((part) => part.text ?? "").join("") ?? ""
+    if (!response.ok) {
+      const msg = data.error?.message ?? `Gemini API error (${response.status})`
+      if (response.status === 429 || response.status === 503) {
+        throw new TransientGeminiError(msg, response.status)
+      }
+      throw new Error(msg)
+    }
+
+    const text =
+      data.candidates?.[0]?.content?.parts?.map((part) => part.text ?? "").join("") ?? ""
     if (!text) throw new Error("Gemini returned an empty response")
-    return JSON.parse(text)
+
+    return options?.json === false ? text.trim() : JSON.parse(text)
   } finally {
     clearTimeout(timeout)
   }
 }
 
-function validateExercises(raw: unknown): GeneratedExerciseItem[] {
+async function callWithFallback<T>(
+  modelsToTry: string[],
+  runner: (model: string) => Promise<T>,
+): Promise<{ result: T; modelUsed: string }> {
+  let lastError: unknown
+
+  for (const model of modelsToTry) {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const result = await runner(model)
+        return { result, modelUsed: model }
+      } catch (error) {
+        lastError = error
+        if (error instanceof TransientGeminiError) {
+          if (attempt === 0) {
+            await new Promise((resolve) => setTimeout(resolve, 1200))
+            continue
+          }
+          // Move immediately to next fallback model after 2 transient failures
+          break
+        }
+      }
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error("Gemini call failed")
+}
+
+function validateMultipleChoiceExercises(raw: unknown): GeneratedExerciseItem[] {
   if (!Array.isArray(raw)) throw new Error("Gemini response is not a JSON array")
   const results: GeneratedExerciseItem[] = []
+
   for (const item of raw) {
     if (
       !item ||
@@ -389,48 +533,261 @@ function validateExercises(raw: unknown): GeneratedExerciseItem[] {
       explanation = "Correct usage based on Cambridge English rules."
     }
 
+    const options = item.options.map(String)
     results.push({
+      exercise_type: "multiple_choice",
       prompt: item.prompt.replace(/_{2,}/g, "______"),
-      options: item.options.map(String),
+      options,
       correct_answer_index: item.correct_answer_index,
+      expected_answer: options[item.correct_answer_index] ?? "",
       explanation,
-      word: item.word || item.options[item.correct_answer_index] || "",
+      word: item.word || options[item.correct_answer_index] || "",
       phonetic: item.phonetic || "",
       spanish_translation: item.spanish_translation || "",
-      difficulty: item.difficulty === "hard" ? "hard" : item.difficulty === "medium" ? "medium" : "easy",
+      difficulty:
+        item.difficulty === "hard" ? "hard" : item.difficulty === "medium" ? "medium" : "easy",
     })
   }
+
   return results
 }
 
+function validateOpenExercises(raw: unknown): GeneratedExerciseItem[] {
+  if (!Array.isArray(raw)) throw new Error("Gemini response is not a JSON array")
+  const results: GeneratedExerciseItem[] = []
+
+  for (const item of raw) {
+    if (
+      !item ||
+      typeof item.prompt !== "string" ||
+      !item.prompt.trim() ||
+      typeof item.expected_answer !== "string" ||
+      !item.expected_answer.trim()
+    ) {
+      continue
+    }
+
+    const expected = item.expected_answer.trim()
+    const rawAcceptable = Array.isArray(item.acceptable_answers)
+      ? (item.acceptable_answers as unknown[])
+          .map((v) => String(v ?? "").trim())
+          .filter((v) => v.length > 0 && v.toLowerCase() !== expected.toLowerCase())
+      : []
+    const acceptable: string[] = Array.from(new Set<string>(rawAcceptable)).slice(0, 4)
+
+    results.push({
+      exercise_type: "open_response",
+      prompt: item.prompt.trim().replace(/_{2,}/g, "______"),
+      options: [],
+      correct_answer_index: 0,
+      expected_answer: expected,
+      acceptable_answers: acceptable,
+      hint: typeof item.hint === "string" && item.hint.trim() ? item.hint.trim() : undefined,
+      explanation:
+        typeof item.explanation === "string" && item.explanation.trim()
+          ? item.explanation.trim()
+          : "Respeta la estructura gramatical del tema.",
+      word: typeof item.word === "string" && item.word.trim() ? item.word.trim() : expected.split(" ")[0] ?? "",
+      phonetic: typeof item.phonetic === "string" ? item.phonetic.trim() : "",
+      spanish_translation:
+        typeof item.spanish_translation === "string" ? item.spanish_translation.trim() : "",
+      difficulty:
+        item.difficulty === "hard" ? "hard" : item.difficulty === "medium" ? "medium" : "easy",
+    })
+  }
+
+  return results
+}
+
+async function generateSingleBatch(params: {
+  kind: "multiple_choice" | "open_response"
+  count: number
+  levelId: CefrLevel
+  levelCode: string
+  topic: TopicDef
+  sampleWords: Array<{ english: string; spanish: string }>
+  modelsToTry: string[]
+}): Promise<{ items: GeneratedExerciseItem[]; modelUsed: string }> {
+  const { kind, count, levelId, levelCode, topic, sampleWords, modelsToTry } = params
+  const isYoungLearner =
+    levelId === "pre-a1-starters" || levelId === "a1-movers" || levelId === "a2-flyers"
+
+  const prompt =
+    kind === "open_response"
+      ? buildOpenResponsePrompt(count, levelId, levelCode, topic, sampleWords)
+      : buildMultipleChoicePrompt(count, levelId, levelCode, topic, sampleWords)
+
+  const schema =
+    kind === "open_response" ? getOpenResponseSchema() : getMultipleChoiceSchema(isYoungLearner)
+
+  const { result, modelUsed } = await callWithFallback(modelsToTry, async (model) => {
+    const raw = await callGemini(prompt, model, {
+      schema,
+      temperature: kind === "open_response" ? 0.55 : 0.5,
+      thinkingLevel: "LOW",
+    })
+    const parsed =
+      kind === "open_response" ? validateOpenExercises(raw) : validateMultipleChoiceExercises(raw)
+    if (parsed.length === 0) {
+      throw new Error("Generated exercises failed validation")
+    }
+    return parsed
+  })
+
+  return { items: result, modelUsed }
+}
+
 /**
- * Generates calibrated CEFR exercises for any topic with automatic model fallback.
+ * Generates calibrated CEFR exercises (multiple choice, open response, or mixed)
+ * with automatic fallback from Gemini 4 Hydrogen and optional Decision-1 QA auditing.
+ */
+export async function generateTopicExercisesDetailed(
+  count: number,
+  levelId: CefrLevel,
+  levelCode: string,
+  topic: TopicDef,
+  sampleWords: Array<{ english: string; spanish: string }> = [],
+  options?: {
+    mode?: ExerciseGenMode
+    tier?: ExerciseGenTier
+    runQa?: boolean
+  },
+): Promise<ExerciseGenerationResult> {
+  const mode = options?.mode ?? "multiple_choice"
+  const tier = options?.tier ?? (mode === "multiple_choice" ? "lightweight" : "heavy")
+  const runQa = options?.runQa ?? true
+  const modelsToTry = resolveModelChain(tier)
+
+  let rawItems: GeneratedExerciseItem[] = []
+  let modelUsed = modelsToTry[0] ?? EXERCISE_MODEL
+
+  if (mode === "mixed" && count >= 2) {
+    const openCount = Math.ceil(count / 2)
+    const mcCount = count - openCount
+
+    const [openBatch, mcBatch] = await Promise.all([
+      generateSingleBatch({
+        kind: "open_response",
+        count: openCount,
+        levelId,
+        levelCode,
+        topic,
+        sampleWords,
+        modelsToTry,
+      }),
+      generateSingleBatch({
+        kind: "multiple_choice",
+        count: mcCount,
+        levelId,
+        levelCode,
+        topic,
+        sampleWords,
+        modelsToTry,
+      }),
+    ])
+
+    rawItems = [...openBatch.items, ...mcBatch.items]
+    modelUsed = openBatch.modelUsed
+  } else {
+    const kind = mode === "open_response" ? "open_response" : "multiple_choice"
+    const batch = await generateSingleBatch({
+      kind,
+      count,
+      levelId,
+      levelCode,
+      topic,
+      sampleWords,
+      modelsToTry,
+    })
+    rawItems = batch.items
+    modelUsed = batch.modelUsed
+  }
+
+  if (!runQa) {
+    return {
+      items: rawItems,
+      modelUsed,
+      qa: {
+        checked: 0,
+        passed: rawItems.length,
+        rejected: 0,
+        skipped: true,
+      },
+    }
+  }
+
+  const qa = await auditGeneratedExercises(rawItems, {
+    levelCode,
+    topicTitle: topic.title,
+    topicFocus: topic.focus,
+  })
+
+  return {
+    items: qa.kept,
+    modelUsed,
+    qa: {
+      checked: qa.checked,
+      passed: qa.passed,
+      rejected: qa.rejected,
+      skipped: qa.skipped,
+    },
+  }
+}
+
+/**
+ * Backward-compatible wrapper returning only the validated exercise array.
  */
 export async function generateTopicExercises(
   count: number,
   levelId: CefrLevel,
   levelCode: string,
   topic: TopicDef,
-  sampleWords: Array<{ english: string; spanish: string }> = []
+  sampleWords: Array<{ english: string; spanish: string }> = [],
 ): Promise<GeneratedExerciseItem[]> {
-  const modelsToTry = [EXERCISE_MODEL, ...FALLBACK_MODELS]
-  const prompt = buildPrompt(count, levelId, levelCode, topic, sampleWords)
-  const isYoungLearner =
-    levelId === "pre-a1-starters" || levelId === "a1-movers" || levelId === "a2-flyers"
-  const schemaToUse = getResponseSchema(isYoungLearner)
-  let lastError: unknown
+  const result = await generateTopicExercisesDetailed(count, levelId, levelCode, topic, sampleWords, {
+    mode: "multiple_choice",
+    tier: "lightweight",
+    runQa: false,
+  })
+  return result.items
+}
 
-  for (const model of modelsToTry) {
-    for (let attempt = 0; attempt < 2; attempt++) {
-      try {
-        const raw = await callGemini(prompt, model, schemaToUse)
-        const parsed = validateExercises(raw)
-        if (parsed.length > 0) return parsed
-        lastError = new Error("Generated exercises failed validation")
-      } catch (error) {
-        lastError = error
-      }
-    }
-  }
-  throw lastError instanceof Error ? lastError : new Error("Exercise generation failed")
+/**
+ * Generates a short, warm, personalized tutor explanation in Spanish only when requested on demand.
+ */
+export async function explainStudentMistake(params: {
+  prompt: string
+  expectedAnswer: string
+  studentAnswer: string
+  level: CefrLevel | string
+  topicTitle: string
+  topicFocus?: string
+  errorCategory?: string
+  score?: number
+}): Promise<{ explanation: string; modelUsed: string }> {
+  const modelsToTry = resolveModelChain("lightweight")
+  const tutorPrompt = `You are a friendly, encouraging English tutor helping a Spanish-speaking student (${params.level}).
+
+Topic: "${params.topicTitle}"${params.topicFocus ? ` (Focus: ${params.topicFocus})` : ""}
+Exercise prompt: "${params.prompt}"
+Expected model answer: "${params.expectedAnswer}"
+Student wrote: "${params.studentAnswer}"
+${params.errorCategory ? `Detected error category: ${params.errorCategory}` : ""}
+${typeof params.score === "number" ? `Rubric score: ${params.score}/3` : ""}
+
+Write a concise, clear explanation in Spanish (2 to 4 short sentences max, plain text without markdown headers) that:
+1. Points out warmly what the student did right or what specifically needs adjusting in "${params.studentAnswer}".
+2. Explains the grammar/vocabulary rule simply so they don't repeat it.
+3. Shows the exact corrected English phrase clearly.`
+
+  const { result, modelUsed } = await callWithFallback(modelsToTry, async (model) => {
+    const text = await callGemini(tutorPrompt, model, {
+      json: false,
+      temperature: 0.3,
+      thinkingLevel: "LOW",
+    })
+    return String(text).trim()
+  })
+
+  return { explanation: result, modelUsed }
 }

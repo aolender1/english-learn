@@ -111,12 +111,18 @@ export const topic = {
   description: "Transform direct speech, questions and requests with accurate tense and perspective changes.",
 }
 
+export type ExerciseType = "multiple_choice" | "open_response"
+
 export type Question = {
   id: string
   difficulty: Difficulty
+  exerciseType?: ExerciseType
   prompt: string
   options: string[]
   answer: number
+  expectedAnswer?: string
+  acceptableAnswers?: string[]
+  hint?: string
   explanation: string
   /** Optional metadata for backend-generated vocabulary exercises. */
   word?: string

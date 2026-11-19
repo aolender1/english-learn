@@ -69,6 +69,7 @@ export async function GET(
         selectedAnswer: practiceAttempts.selectedAnswer,
         correctAnswer: practiceAttempts.correctAnswer,
         isCorrect: practiceAttempts.isCorrect,
+        evaluation: practiceAttempts.evaluation,
         responseTimeMs: practiceAttempts.responseTimeMs,
         answeredAt: practiceAttempts.answeredAt,
       })
@@ -83,6 +84,7 @@ export async function GET(
           .select({
             id: exercises.id,
             prompt: exercises.prompt,
+            exerciseType: exercises.exerciseType,
             topicSlug: exercises.topicSlug,
             level: exercises.level,
             word: exercises.word,
@@ -103,7 +105,8 @@ export async function GET(
         return {
           id: a.id,
           roundId: a.roundId,
-          prompt: ex?.prompt ?? "Multiple choice question",
+          prompt: ex?.prompt ?? "Practice question",
+          exerciseType: ex?.exerciseType ?? "multiple_choice",
           word: ex?.word,
           explanation: ex?.explanation,
           topicSlug: ex?.topicSlug,
@@ -111,6 +114,7 @@ export async function GET(
           level: ex?.level,
           selectedAnswer: a.selectedAnswer,
           correctAnswer: a.correctAnswer,
+          evaluation: a.evaluation,
           answeredAt: a.answeredAt,
           responseTimeMs: a.responseTimeMs,
         }

@@ -75,6 +75,7 @@ type StudentDetail = {
     id: string
     roundId: string
     prompt: string
+    exerciseType?: string
     word?: string
     explanation?: string
     topicSlug?: string
@@ -82,6 +83,11 @@ type StudentDetail = {
     level?: string
     selectedAnswer: string
     correctAnswer: string
+    evaluation?: {
+      errorCategory?: string
+      errorLabelEs?: string
+      score?: number
+    } | null
     answeredAt: string
     responseTimeMs?: number
   }>
@@ -112,9 +118,13 @@ type ExerciseItem = {
   id: string
   topicSlug: string
   level: string
+  exerciseType?: "multiple_choice" | "open_response"
   prompt: string
   options: string[]
   correctAnswerIndex: number
+  expectedAnswer?: string | null
+  acceptableAnswers?: string[] | null
+  hint?: string | null
   explanation: string
   word: string | null
   phonetic: string | null
@@ -302,13 +312,19 @@ export function TeacherDashboard({ teacherEmail }: { teacherEmail: string }) {
   const [editingExercise, setEditingExercise] = useState<ExerciseItem | null>(null)
   const [generatingAi, setGeneratingAi] = useState(false)
   const [aiCount, setAiCount] = useState(5)
+  const [aiMode, setAiMode] = useState<"multiple_choice" | "open_response" | "mixed">("mixed")
+  const [aiTier, setAiTier] = useState<"heavy" | "lightweight">("heavy")
   const [exerciseForm, setExerciseForm] = useState({
+    exerciseType: "multiple_choice" as "multiple_choice" | "open_response",
     prompt: "",
     option0: "",
     option1: "",
     option2: "",
     option3: "",
     correctAnswerIndex: 0,
+    expectedAnswer: "",
+    acceptableAnswersText: "",
+    hint: "",
     explanation: "",
     word: "",
     difficulty: "medium",
@@ -545,14 +561,53 @@ export function TeacherDashboard({ teacherEmail }: { teacherEmail: string }) {
     e.preventDefault()
     setBusy(true)
     setMessage(null)
-    const options = [exerciseForm.option0, exerciseForm.option1, exerciseForm.option2, exerciseForm.option3].filter(
-      (o) => o.trim().length > 0
-    )
-    if (options.length < 2) {
+
+    const isOpen = exerciseForm.exerciseType === "open_response"
+    const options = isOpen
+      ? []
+      : [exerciseForm.option0, exerciseForm.option1, exerciseForm.option2, exerciseForm.option3].filter(
+          (o) => o.trim().length > 0
+        )
+
+    if (isOpen && !exerciseForm.expectedAnswer.trim()) {
+      setMessage({ text: "Please provide the expected model answer.", error: true })
+      setBusy(false)
+      return
+    }
+    if (!isOpen && options.length < 2) {
       setMessage({ text: "Please provide at least 2 options.", error: true })
       setBusy(false)
       return
     }
+
+    const acceptableAnswers = exerciseForm.acceptableAnswersText
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean)
+
+    const payload = isOpen
+      ? {
+          exerciseType: "open_response" as const,
+          prompt: exerciseForm.prompt,
+          options: [],
+          correctAnswerIndex: 0,
+          expectedAnswer: exerciseForm.expectedAnswer.trim(),
+          acceptableAnswers,
+          hint: exerciseForm.hint.trim(),
+          explanation: exerciseForm.explanation,
+          word: exerciseForm.word,
+          difficulty: exerciseForm.difficulty,
+        }
+      : {
+          exerciseType: "multiple_choice" as const,
+          prompt: exerciseForm.prompt,
+          options,
+          correctAnswerIndex: Math.min(exerciseForm.correctAnswerIndex, options.length - 1),
+          expectedAnswer: options[Math.min(exerciseForm.correctAnswerIndex, options.length - 1)] ?? "",
+          explanation: exerciseForm.explanation,
+          word: exerciseForm.word,
+          difficulty: exerciseForm.difficulty,
+        }
 
     try {
       if (editingExercise) {
@@ -561,12 +616,7 @@ export function TeacherDashboard({ teacherEmail }: { teacherEmail: string }) {
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
             id: editingExercise.id,
-            prompt: exerciseForm.prompt,
-            options,
-            correctAnswerIndex: Math.min(exerciseForm.correctAnswerIndex, options.length - 1),
-            explanation: exerciseForm.explanation,
-            word: exerciseForm.word,
-            difficulty: exerciseForm.difficulty,
+            ...payload,
           }),
         })
         if (!res.ok) throw new Error("Failed to update exercise")
@@ -578,12 +628,7 @@ export function TeacherDashboard({ teacherEmail }: { teacherEmail: string }) {
           body: JSON.stringify({
             topicSlug: selectedTopicSlug,
             level: exerciseLevel,
-            prompt: exerciseForm.prompt,
-            options,
-            correctAnswerIndex: Math.min(exerciseForm.correctAnswerIndex, options.length - 1),
-            explanation: exerciseForm.explanation,
-            word: exerciseForm.word,
-            difficulty: exerciseForm.difficulty,
+            ...payload,
           }),
         })
         if (!res.ok) throw new Error("Failed to create exercise")
@@ -627,11 +672,19 @@ export function TeacherDashboard({ teacherEmail }: { teacherEmail: string }) {
           topicSlug: selectedTopicSlug,
           level: exerciseLevel,
           count: aiCount,
+          mode: aiMode,
+          tier: aiTier,
+          runQa: true,
         }),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error ?? "AI Generation failed")
-      setMessage({ text: `✓ Successfully generated and added ${data.count} exercises with Gemini AI!` })
+      const qaText =
+        data.qa && !data.qa.skipped && data.qa.checked > 0
+          ? ` · QA Decision-1: ${data.qa.passed}/${data.qa.checked} aprobados`
+          : ""
+      const modelText = data.modelUsed ? ` · Modelo: ${data.modelUsed}` : ""
+      setMessage({ text: `✓ ${data.count} ejercicios agregados${modelText}${qaText}` })
       await fetchExercisesForTopic(selectedTopicSlug, exerciseLevel)
       await refreshTopics()
     } catch (err) {
@@ -803,8 +856,16 @@ export function TeacherDashboard({ teacherEmail }: { teacherEmail: string }) {
                   <div className="flex flex-col divide-y divide-border border border-border bg-card">
                     {studentDetail.mistakes.map((m, i) => (
                       <div key={m.id || i} className="p-5 flex flex-col gap-2.5">
-                        <div className="flex items-center justify-between gap-3 text-xs">
-                          <span className="tag font-mono text-[10px]">{m.topicTitle}</span>
+                        <div className="flex flex-wrap items-center justify-between gap-3 text-xs">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <span className="tag font-mono text-[10px]">{m.topicTitle}</span>
+                            {m.evaluation?.errorLabelEs && (
+                              <span className="tag font-mono text-[10px] text-destructive border-destructive/40">
+                                {m.evaluation.errorLabelEs}
+                                {typeof m.evaluation.score === "number" ? ` · ${m.evaluation.score.toFixed(1)}/3` : ""}
+                              </span>
+                            )}
+                          </div>
                           <span className="text-muted-foreground">{formatDate(m.answeredAt)} {formatTime(m.answeredAt)}</span>
                         </div>
                         <p className="font-serif text-base font-medium">{m.prompt}</p>
@@ -1489,12 +1550,16 @@ export function TeacherDashboard({ teacherEmail }: { teacherEmail: string }) {
                 onClick={() => {
                   setEditingExercise(null)
                   setExerciseForm({
+                    exerciseType: "multiple_choice",
                     prompt: "",
                     option0: "",
                     option1: "",
                     option2: "",
                     option3: "",
                     correctAnswerIndex: 0,
+                    expectedAnswer: "",
+                    acceptableAnswersText: "",
+                    hint: "",
                     explanation: "",
                     word: "",
                     difficulty: "medium",
@@ -1505,6 +1570,38 @@ export function TeacherDashboard({ teacherEmail }: { teacherEmail: string }) {
               >
                 <Plus size={14} /> Add Manual Question
               </button>
+              <select
+                value={aiMode}
+                onChange={(e) => setAiMode(e.target.value as "multiple_choice" | "open_response" | "mixed")}
+                className="input-field py-1 text-xs w-40"
+                disabled={generatingAi}
+                aria-label="Exercise generation format"
+              >
+                <option value="mixed">Mixto (MC + Abierta)</option>
+                <option value="open_response">Respuesta abierta</option>
+                <option value="multiple_choice">Opción múltiple</option>
+              </select>
+              <select
+                value={aiTier}
+                onChange={(e) => setAiTier(e.target.value as "heavy" | "lightweight")}
+                className="input-field py-1 text-xs w-44"
+                disabled={generatingAi}
+                aria-label="Gemini model tier"
+              >
+                <option value="heavy">Gemini 4 Hydrogen</option>
+                <option value="lightweight">3.5 Flash-Lite</option>
+              </select>
+              <select
+                value={aiCount}
+                onChange={(e) => setAiCount(Number(e.target.value))}
+                className="input-field py-1 text-xs w-20"
+                disabled={generatingAi}
+                aria-label="Number of questions"
+              >
+                <option value={5}>5 Qs</option>
+                <option value={10}>10 Qs</option>
+                <option value={20}>20 Qs</option>
+              </select>
               <button
                 onClick={generateWithAi}
                 disabled={generatingAi || !selectedTopicSlug}
@@ -1513,16 +1610,6 @@ export function TeacherDashboard({ teacherEmail }: { teacherEmail: string }) {
                 <Sparkles size={14} />
                 {generatingAi ? "Generating with Gemini…" : `Generate ${aiCount} with AI`}
               </button>
-              <select
-                value={aiCount}
-                onChange={(e) => setAiCount(Number(e.target.value))}
-                className="input-field py-1 text-xs w-20"
-                disabled={generatingAi}
-              >
-                <option value={5}>5 Qs</option>
-                <option value={10}>10 Qs</option>
-                <option value={20}>20 Qs</option>
-              </select>
             </div>
           </div>
 
@@ -1582,85 +1669,188 @@ export function TeacherDashboard({ teacherEmail }: { teacherEmail: string }) {
                 </div>
 
                 <form onSubmit={saveExercise} className="flex flex-col gap-4 mt-4">
+                  <div className="flex flex-col gap-1 text-xs font-medium">
+                    <span>Exercise Format</span>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setExerciseForm({ ...exerciseForm, exerciseType: "multiple_choice" })}
+                        className={`p-2 border rounded text-xs font-semibold transition-colors ${
+                          exerciseForm.exerciseType === "multiple_choice"
+                            ? "border-primary bg-primary/10 text-primary"
+                            : "border-border bg-secondary/40 text-muted-foreground"
+                        }`}
+                      >
+                        Opción múltiple
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setExerciseForm({ ...exerciseForm, exerciseType: "open_response" })}
+                        className={`p-2 border rounded text-xs font-semibold transition-colors ${
+                          exerciseForm.exerciseType === "open_response"
+                            ? "border-primary bg-primary/10 text-primary"
+                            : "border-border bg-secondary/40 text-muted-foreground"
+                        }`}
+                      >
+                        Respuesta abierta (IA)
+                      </button>
+                    </div>
+                  </div>
+
                   <label className="flex flex-col gap-1 text-xs font-medium">
-                    Question Prompt (use ______ for blanks)
+                    {exerciseForm.exerciseType === "open_response"
+                      ? "Question Prompt (sentence, translation, or rewrite)"
+                      : "Question Prompt (use ______ for blanks)"}
                     <input
                       type="text"
                       required
                       value={exerciseForm.prompt}
                       onChange={(e) => setExerciseForm({ ...exerciseForm, prompt: e.target.value })}
-                      placeholder="e.g. She told me that she ______ the report earlier."
+                      placeholder={
+                        exerciseForm.exerciseType === "open_response"
+                          ? 'e.g. Report this: Mia said, "I am tired."'
+                          : "e.g. She told me that she ______ the report earlier."
+                      }
                       className="input-field text-sm"
                     />
                   </label>
 
-                  <div className="grid grid-cols-2 gap-3">
-                    <label className="flex flex-col gap-1 text-xs font-medium">
-                      Target Vocabulary Word
-                      <input
-                        type="text"
-                        value={exerciseForm.word}
-                        onChange={(e) => setExerciseForm({ ...exerciseForm, word: e.target.value })}
-                        placeholder="e.g. report"
-                        className="input-field text-sm"
-                      />
-                    </label>
+                  {exerciseForm.exerciseType === "open_response" ? (
+                    <>
+                      <label className="flex flex-col gap-1 text-xs font-medium">
+                        Expected Answer (Respuesta modelo)
+                        <input
+                          type="text"
+                          required
+                          value={exerciseForm.expectedAnswer}
+                          onChange={(e) => setExerciseForm({ ...exerciseForm, expectedAnswer: e.target.value })}
+                          placeholder="e.g. Mia said that she was tired."
+                          className="input-field text-sm border-primary/50"
+                        />
+                      </label>
 
-                    <label className="flex flex-col gap-1 text-xs font-medium">
-                      Correct Answer Option
-                      <select
-                        value={exerciseForm.correctAnswerIndex}
-                        onChange={(e) => setExerciseForm({ ...exerciseForm, correctAnswerIndex: Number(e.target.value) })}
-                        className="input-field text-sm font-semibold text-primary"
-                      >
-                        <option value={0}>Option A</option>
-                        <option value={1}>Option B</option>
-                        <option value={2}>Option C</option>
-                        <option value={3}>Option D</option>
-                      </select>
-                    </label>
-                  </div>
+                      <label className="flex flex-col gap-1 text-xs font-medium">
+                        Acceptable Alternatives (one per line, optional)
+                        <textarea
+                          rows={2}
+                          value={exerciseForm.acceptableAnswersText}
+                          onChange={(e) =>
+                            setExerciseForm({ ...exerciseForm, acceptableAnswersText: e.target.value })
+                          }
+                          placeholder={"Mia said she was tired.\nMia told me that she was tired."}
+                          className="input-field text-xs font-mono"
+                        />
+                      </label>
 
-                  <div className="grid grid-cols-2 gap-2">
-                    <label className="flex flex-col gap-1 text-xs">
-                      Option A {exerciseForm.correctAnswerIndex === 0 && "(Correct)"}
-                      <input
-                        type="text"
-                        required
-                        value={exerciseForm.option0}
-                        onChange={(e) => setExerciseForm({ ...exerciseForm, option0: e.target.value })}
-                        className={`input-field text-sm ${exerciseForm.correctAnswerIndex === 0 ? "border-primary font-medium" : ""}`}
-                      />
-                    </label>
-                    <label className="flex flex-col gap-1 text-xs">
-                      Option B {exerciseForm.correctAnswerIndex === 1 && "(Correct)"}
-                      <input
-                        type="text"
-                        required
-                        value={exerciseForm.option1}
-                        onChange={(e) => setExerciseForm({ ...exerciseForm, option1: e.target.value })}
-                        className={`input-field text-sm ${exerciseForm.correctAnswerIndex === 1 ? "border-primary font-medium" : ""}`}
-                      />
-                    </label>
-                    <label className="flex flex-col gap-1 text-xs">
-                      Option C {exerciseForm.correctAnswerIndex === 2 && "(Correct)"}
-                      <input
-                        type="text"
-                        value={exerciseForm.option2}
-                        onChange={(e) => setExerciseForm({ ...exerciseForm, option2: e.target.value })}
-                        className={`input-field text-sm ${exerciseForm.correctAnswerIndex === 2 ? "border-primary font-medium" : ""}`}
-                      />
-                    </label>
-                    <label className="flex flex-col gap-1 text-xs">
-                      Option D {exerciseForm.correctAnswerIndex === 3 && "(Correct)"}
-                      <input
-                        type="text"
-                        value={exerciseForm.option3}
-                        onChange={(e) => setExerciseForm({ ...exerciseForm, option3: e.target.value })}
-                        className={`input-field text-sm ${exerciseForm.correctAnswerIndex === 3 ? "border-primary font-medium" : ""}`}
-                      />
-                    </label>
-                  </div>
+                      <div className="grid grid-cols-2 gap-3">
+                        <label className="flex flex-col gap-1 text-xs font-medium">
+                          Hint (Pista opcional en español)
+                          <input
+                            type="text"
+                            value={exerciseForm.hint}
+                            onChange={(e) => setExerciseForm({ ...exerciseForm, hint: e.target.value })}
+                            placeholder="e.g. Recordá pasar 'am' al pasado."
+                            className="input-field text-sm"
+                          />
+                        </label>
+                        <label className="flex flex-col gap-1 text-xs font-medium">
+                          Target Vocabulary Word
+                          <input
+                            type="text"
+                            value={exerciseForm.word}
+                            onChange={(e) => setExerciseForm({ ...exerciseForm, word: e.target.value })}
+                            placeholder="e.g. tired"
+                            className="input-field text-sm"
+                          />
+                        </label>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="grid grid-cols-2 gap-3">
+                        <label className="flex flex-col gap-1 text-xs font-medium">
+                          Target Vocabulary Word
+                          <input
+                            type="text"
+                            value={exerciseForm.word}
+                            onChange={(e) => setExerciseForm({ ...exerciseForm, word: e.target.value })}
+                            placeholder="e.g. report"
+                            className="input-field text-sm"
+                          />
+                        </label>
+
+                        <label className="flex flex-col gap-1 text-xs font-medium">
+                          Correct Answer Option
+                          <select
+                            value={exerciseForm.correctAnswerIndex}
+                            onChange={(e) =>
+                              setExerciseForm({ ...exerciseForm, correctAnswerIndex: Number(e.target.value) })
+                            }
+                            className="input-field text-sm font-semibold text-primary"
+                          >
+                            <option value={0}>Option A</option>
+                            <option value={1}>Option B</option>
+                            <option value={2}>Option C</option>
+                            <option value={3}>Option D</option>
+                          </select>
+                        </label>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2">
+                        <label className="flex flex-col gap-1 text-xs">
+                          Option A {exerciseForm.correctAnswerIndex === 0 && "(Correct)"}
+                          <input
+                            type="text"
+                            required
+                            value={exerciseForm.option0}
+                            onChange={(e) => setExerciseForm({ ...exerciseForm, option0: e.target.value })}
+                            className={`input-field text-sm ${exerciseForm.correctAnswerIndex === 0 ? "border-primary font-medium" : ""}`}
+                          />
+                        </label>
+                        <label className="flex flex-col gap-1 text-xs">
+                          Option B {exerciseForm.correctAnswerIndex === 1 && "(Correct)"}
+                          <input
+                            type="text"
+                            required
+                            value={exerciseForm.option1}
+                            onChange={(e) => setExerciseForm({ ...exerciseForm, option1: e.target.value })}
+                            className={`input-field text-sm ${exerciseForm.correctAnswerIndex === 1 ? "border-primary font-medium" : ""}`}
+                          />
+                        </label>
+                        <label className="flex flex-col gap-1 text-xs">
+                          Option C {exerciseForm.correctAnswerIndex === 2 && "(Correct)"}
+                          <input
+                            type="text"
+                            value={exerciseForm.option2}
+                            onChange={(e) => setExerciseForm({ ...exerciseForm, option2: e.target.value })}
+                            className={`input-field text-sm ${exerciseForm.correctAnswerIndex === 2 ? "border-primary font-medium" : ""}`}
+                          />
+                        </label>
+                        <label className="flex flex-col gap-1 text-xs">
+                          Option D {exerciseForm.correctAnswerIndex === 3 && "(Correct)"}
+                          <input
+                            type="text"
+                            value={exerciseForm.option3}
+                            onChange={(e) => setExerciseForm({ ...exerciseForm, option3: e.target.value })}
+                            className={`input-field text-sm ${exerciseForm.correctAnswerIndex === 3 ? "border-primary font-medium" : ""}`}
+                          />
+                        </label>
+                      </div>
+                    </>
+                  )}
+
+                  <label className="flex flex-col gap-1 text-xs font-medium">
+                    Difficulty
+                    <select
+                      value={exerciseForm.difficulty}
+                      onChange={(e) => setExerciseForm({ ...exerciseForm, difficulty: e.target.value })}
+                      className="input-field text-sm"
+                    >
+                      <option value="easy">Easy</option>
+                      <option value="medium">Medium</option>
+                      <option value="hard">Hard</option>
+                    </select>
+                  </label>
 
                   <label className="flex flex-col gap-1 text-xs font-medium">
                     Explanation
@@ -1719,72 +1909,107 @@ export function TeacherDashboard({ teacherEmail }: { teacherEmail: string }) {
               </div>
             ) : (
               <div className="flex flex-col divide-y divide-border border border-border bg-card">
-                {exercisesList.map((ex, i) => (
-                  <div key={ex.id} className="p-5 flex flex-col gap-3">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <span className="font-mono text-xs font-bold text-muted-foreground">
-                          #{String(i + 1).padStart(2, "0")}
-                        </span>
-                        {ex.word && <AudioWordBadge word={ex.word} />}
-                        <span className="tag text-[10px] uppercase font-mono">{ex.createdBy}</span>
-                      </div>
-                      <div className="flex items-center gap-1">
-                        <button
-                          onClick={() => {
-                            setEditingExercise(ex)
-                            setExerciseForm({
-                              prompt: ex.prompt,
-                              option0: ex.options[0] ?? "",
-                              option1: ex.options[1] ?? "",
-                              option2: ex.options[2] ?? "",
-                              option3: ex.options[3] ?? "",
-                              correctAnswerIndex: ex.correctAnswerIndex ?? 0,
-                              explanation: ex.explanation ?? "",
-                              word: ex.word ?? "",
-                              difficulty: ex.difficulty ?? "medium",
-                            })
-                          }}
-                          className="icon-button size-8"
-                          title="Edit exercise"
-                        >
-                          <Edit2 size={13} />
-                        </button>
-                        <button
-                          onClick={() => deleteExercise(ex.id)}
-                          className="icon-button size-8 text-destructive"
-                          title="Delete exercise"
-                        >
-                          <Trash2 size={13} />
-                        </button>
-                      </div>
-                    </div>
-
-                    <p className="font-serif text-lg font-medium">{ex.prompt}</p>
-
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                      {ex.options.map((opt, optIdx) => (
-                        <div
-                          key={optIdx}
-                          className={`p-2 text-xs border rounded flex items-center justify-between ${
-                            optIdx === ex.correctAnswerIndex
-                              ? "border-primary bg-primary/10 text-primary font-semibold"
-                              : "border-border bg-secondary/40 text-muted-foreground"
-                          }`}
-                        >
-                          <span>{String.fromCharCode(65 + optIdx)}. {opt}</span>
-                          {optIdx === ex.correctAnswerIndex && <Check size={13} />}
+                {exercisesList.map((ex, i) => {
+                  const isOpen = ex.exerciseType === "open_response" || !ex.options?.length
+                  return (
+                    <div key={ex.id} className="p-5 flex flex-col gap-3">
+                      <div className="flex items-center justify-between">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="font-mono text-xs font-bold text-muted-foreground">
+                            #{String(i + 1).padStart(2, "0")}
+                          </span>
+                          <span
+                            className={`tag text-[10px] uppercase font-mono ${
+                              isOpen ? "text-primary border-primary/40" : ""
+                            }`}
+                          >
+                            {isOpen ? "ABIERTA" : "OPCIÓN MÚLTIPLE"}
+                          </span>
+                          {ex.word && <AudioWordBadge word={ex.word} />}
+                          <span className="tag text-[10px] uppercase font-mono">{ex.createdBy}</span>
                         </div>
-                      ))}
-                    </div>
+                        <div className="flex items-center gap-1">
+                          <button
+                            onClick={() => {
+                              setEditingExercise(ex)
+                              setExerciseForm({
+                                exerciseType: isOpen ? "open_response" : "multiple_choice",
+                                prompt: ex.prompt,
+                                option0: ex.options?.[0] ?? "",
+                                option1: ex.options?.[1] ?? "",
+                                option2: ex.options?.[2] ?? "",
+                                option3: ex.options?.[3] ?? "",
+                                correctAnswerIndex: ex.correctAnswerIndex ?? 0,
+                                expectedAnswer: ex.expectedAnswer ?? "",
+                                acceptableAnswersText: Array.isArray(ex.acceptableAnswers)
+                                  ? ex.acceptableAnswers.join("\n")
+                                  : "",
+                                hint: ex.hint ?? "",
+                                explanation: ex.explanation ?? "",
+                                word: ex.word ?? "",
+                                difficulty: ex.difficulty ?? "medium",
+                              })
+                            }}
+                            className="icon-button size-8"
+                            title="Edit exercise"
+                          >
+                            <Edit2 size={13} />
+                          </button>
+                          <button
+                            onClick={() => deleteExercise(ex.id)}
+                            className="icon-button size-8 text-destructive"
+                            title="Delete exercise"
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        </div>
+                      </div>
 
-                    {ex.explanation && (
-                      <p className="text-xs text-muted-foreground bg-secondary/40 p-2.5 border border-border/60 rounded">
-                        <strong>Explanation:</strong> {ex.explanation}
-                      </p>
-                    )}
-                  </div>
-                ))}
+                      <p className="font-serif text-lg font-medium">{ex.prompt}</p>
+
+                      {isOpen ? (
+                        <div className="flex flex-col gap-2 rounded border border-primary/25 bg-primary/5 p-3 text-xs">
+                          <div>
+                            <strong className="text-primary">Expected Answer:</strong>{" "}
+                            <span className="font-medium text-foreground">{ex.expectedAnswer || "—"}</span>
+                          </div>
+                          {Array.isArray(ex.acceptableAnswers) && ex.acceptableAnswers.length > 0 && (
+                            <div className="text-muted-foreground">
+                              <strong>Alternatives:</strong> {ex.acceptableAnswers.join(" | ")}
+                            </div>
+                          )}
+                          {ex.hint && (
+                            <div className="text-muted-foreground">
+                              <strong>Hint:</strong> {ex.hint}
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                          {ex.options.map((opt, optIdx) => (
+                            <div
+                              key={optIdx}
+                              className={`p-2 text-xs border rounded flex items-center justify-between ${
+                                optIdx === ex.correctAnswerIndex
+                                  ? "border-primary bg-primary/10 text-primary font-semibold"
+                                  : "border-border bg-secondary/40 text-muted-foreground"
+                              }`}
+                            >
+                              <span>{String.fromCharCode(65 + optIdx)}. {opt}</span>
+                              {optIdx === ex.correctAnswerIndex && <Check size={13} />}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {ex.explanation && (
+                        <p className="text-xs text-muted-foreground bg-secondary/40 p-2.5 border border-border/60 rounded">
+                          <strong>Explanation:</strong> {ex.explanation}
+                        </p>
+                      )}
+                    </div>
+                  )
+                })}
               </div>
             )}
           </div>

@@ -4,10 +4,11 @@
     "lightweight": {
       "id": "lightweight",
       "name": "Trabajo Liviano / Interactivo",
-      "description": "Generación de ejercicios en tiempo real y en demanda desde el panel de profesores (Teacher Dashboard). Prioriza baja latencia, respuestas rápidas y menor consumo de tokens.",
+      "description": "Generación rápida bajo demanda desde el Teacher Dashboard y explicaciones breves de errores para estudiantes. Prioriza baja latencia y mínimo costo.",
       "primaryModel": "gemini-3.5-flash-lite",
       "fallbackModels": [
-        "gemini-3.1-flash-lite"
+        "gemini-4-hydrogen",
+        "gemini-3.8-flash"
       ],
       "envOverride": "GEMINI_EXERCISE_MODEL",
       "temperature": 0.5
@@ -15,22 +16,58 @@
     "heavy": {
       "id": "heavy",
       "name": "Trabajo Pesado / Lotes y Calibración",
-      "description": "Generación masiva por lotes (scripts CLI), calibración estricta de niveles MCER (Pre A1 hasta C2), y análisis gramatical profundo con explicaciones pedagógicas bilingües.",
-      "primaryModel": "gemini-3.8-flash",
+      "description": "Generación de ejercicios abiertos y por lotes, calibración estricta de niveles MCER (Pre A1 hasta C2) y análisis gramatical con explicaciones bilingües.",
+      "primaryModel": "gemini-4-hydrogen",
       "fallbackModels": [
-        "gemini-3.7-flash"
+        "gemini-3.8-flash",
+        "gemini-3.5-flash-lite"
       ],
       "envOverride": "GEMINI_HEAVY_MODEL",
+      "thinkingLevel": "LOW",
       "temperature": 0.4
+    },
+    "decision": {
+      "id": "decision",
+      "name": "Evaluación Calibrada y Auditoría (Decisions API)",
+      "description": "Evaluación instantánea de respuestas abiertas del alumno (gramática, categoría de error y puntaje por rúbrica) y auditoría de calidad (QA) con 0 tokens de salida.",
+      "primaryModel": "gemini-decision-1",
+      "fallbackModels": [],
+      "envOverride": "GEMINI_DECISION_MODEL"
     }
   },
   "models": {
+    "gemini-4-hydrogen": {
+      "id": "gemini-4-hydrogen",
+      "name": "Gemini 4 Hydrogen",
+      "tier": "heavy",
+      "role": "Modelo primario para generación avanzada de ejercicios abiertos y calibración MCER",
+      "description": "Modelo de nueva generación Gemini 4 optimizado para velocidad, razonamiento configurable (LOW/MEDIUM/HIGH/XHIGH) y alta precisión pedagógica.",
+      "contextWindow": "1M tokens",
+      "strengths": [
+        "Alta calidad pedagógica en niveles A1–C2",
+        "Razonamiento configurable sin latencia innecesaria",
+        "Disponible en Free Tier de Google AI Studio"
+      ]
+    },
+    "gemini-decision-1": {
+      "id": "gemini-decision-1",
+      "name": "Gemini Decision 1",
+      "tier": "decision",
+      "role": "Motor de evaluación estructurada de respuestas abiertas y QA",
+      "description": "Evalúa preguntas cerradas (noul/choice/score) en una sola pasada devolviendo probabilidades calibradas y confianza con 0 tokens de salida.",
+      "contextWindow": "262K tokens",
+      "strengths": [
+        "0 tokens de salida (muy económico)",
+        "Probabilidades calibradas y confianza por criterio",
+        "Clasificación paralela de múltiples dimensiones de error"
+      ]
+    },
     "gemini-3.5-flash-lite": {
       "id": "gemini-3.5-flash-lite",
       "name": "Gemini 3.5 Flash-Lite",
       "tier": "lightweight",
-      "role": "Modelo primario para trabajo liviano en el dashboard de profesores",
-      "description": "Excelente balance de velocidad ultra rápida, alta disponibilidad y coste óptimo para generar ejercicios individuales o tandas pequeñas.",
+      "role": "Modelo primario para trabajo liviano y explicaciones breves bajo demanda",
+      "description": "Balance óptimo de latencia mínima, alta cuota y bajo costo para tandas chicas y explicaciones puntuales al alumno.",
       "contextWindow": "1M tokens",
       "strengths": [
         "Ultra baja latencia",
@@ -38,41 +75,17 @@
         "Formateo JSON estricto estructurado"
       ]
     },
-    "gemini-3.1-flash-lite": {
-      "id": "gemini-3.1-flash-lite",
-      "name": "Gemini 3.1 Flash-Lite",
-      "tier": "fallback",
-      "role": "Modelo de respaldo para trabajo liviano",
-      "description": "Se utiliza automáticamente como contingencia si el modelo 3.5 alcanza límites de tasa (rate limits) o indisponibilidad temporal.",
-      "contextWindow": "1M tokens",
-      "strengths": [
-        "Alta velocidad",
-        "Estabilidad comprobada"
-      ]
-    },
     "gemini-3.8-flash": {
       "id": "gemini-3.8-flash",
       "name": "Gemini 3.8 Flash",
-      "tier": "heavy",
-      "role": "Modelo primario para tareas pesadas y generación masiva",
-      "description": "Modelo de última generación con capacidad superior de razonamiento, precisión pedagógica en Cambridge English y calibración gramatical rigurosa.",
-      "contextWindow": "1M tokens",
-      "strengths": [
-        "Razonamiento lingüístico avanzado",
-        "Cumplimiento estricto de distores pedagógicos",
-        "Explicaciones bilingües detalladas"
-      ]
-    },
-    "gemini-3.7-flash": {
-      "id": "gemini-3.7-flash",
-      "name": "Gemini 3.7 Flash",
       "tier": "fallback",
-      "role": "Modelo de respaldo para tareas pesadas",
-      "description": "Alternativa de alta potencia si la versión 3.8 experimenta alta demanda o fallos temporales en lotes grandes.",
+      "role": "Modelo de respaldo de alto nivel para generación y calibración",
+      "description": "Respaldo automático si Gemini 4 Hydrogen experimenta alta demanda temporal (503/429).",
       "contextWindow": "1M tokens",
       "strengths": [
-        "Alta capacidad de razonamiento",
-        "Excelente coherencia en lotes extensos"
+        "Razonamiento lingüístico sólido",
+        "Cumplimiento estricto de distractores pedagógicos",
+        "Explicaciones bilingües detalladas"
       ]
     }
   }

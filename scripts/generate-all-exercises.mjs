@@ -21,8 +21,8 @@ const aiConfig = existsSync(aiConfigPath)
   ? JSON.parse(readFileSync(aiConfigPath, "utf-8"))
   : null
 
-const MODEL = process.env.GEMINI_HEAVY_MODEL ?? aiConfig?.tasks?.heavy?.primaryModel ?? "gemini-3.8-flash"
-const FALLBACK_MODEL = aiConfig?.tasks?.heavy?.fallbackModels?.[0] ?? "gemini-3.7-flash"
+const MODEL = process.env.GEMINI_HEAVY_MODEL ?? aiConfig?.tasks?.heavy?.primaryModel ?? "gemini-4-hydrogen"
+const FALLBACK_MODEL = aiConfig?.tasks?.heavy?.fallbackModels?.[0] ?? "gemini-3.8-flash"
 
 // Load CEFR vocabularies from CSV
 const VOCAB_FILES = {
@@ -173,16 +173,24 @@ async function callGeminiWithRetry(prompt, maxRetries = 6) {
       const controller = new AbortController()
       const timeout = setTimeout(() => controller.abort(), 60000)
 
-      const res = await fetch(`${API_BASE}/models/${modelToUse}:generateContent?key=${key}`, {
+      const generationConfig = {
+        temperature: 0.65,
+        responseMimeType: "application/json",
+        responseSchema: RESPONSE_SCHEMA,
+      }
+      if (modelToUse.startsWith("gemini-4-")) {
+        generationConfig.thinkingConfig = { thinkingLevel: "LOW" }
+      }
+
+      const res = await fetch(`${API_BASE}/models/${modelToUse}:generateContent`, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: {
+          "x-goog-api-key": key,
+          "content-type": "application/json",
+        },
         body: JSON.stringify({
           contents: [{ role: "user", parts: [{ text: prompt }] }],
-          generationConfig: {
-            temperature: 0.65,
-            responseMimeType: "application/json",
-            responseSchema: RESPONSE_SCHEMA,
-          },
+          generationConfig,
         }),
         signal: controller.signal,
       })

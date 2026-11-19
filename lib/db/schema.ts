@@ -56,9 +56,13 @@ export const exercises = pgTable("exercises", {
   id: uuid("id").primaryKey().defaultRandom(),
   topicSlug: text("topic_slug").notNull(),
   level: text("level").notNull(),
+  exerciseType: text("exercise_type").notNull().default("multiple_choice"),
   prompt: text("prompt").notNull(),
-  options: jsonb("options").notNull(),
+  options: jsonb("options").notNull().default(sql`'[]'::jsonb`),
   correctAnswerIndex: integer("correct_answer_index").notNull().default(0),
+  expectedAnswer: text("expected_answer"),
+  acceptableAnswers: jsonb("acceptable_answers"),
+  hint: text("hint"),
   explanation: text("explanation").notNull(),
   word: text("word"),
   phonetic: text("phonetic"),
@@ -68,8 +72,10 @@ export const exercises = pgTable("exercises", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [
+  check("exercises_exercise_type_check", sql`${table.exerciseType} in ('multiple_choice', 'open_response')`),
   index("idx_exercises_topic_level").on(table.topicSlug, table.level),
   index("idx_exercises_word").on(table.word),
+  index("idx_exercises_type").on(table.exerciseType),
 ])
 
 export const exerciseCache = pgTable("exercise_cache", {
@@ -112,6 +118,7 @@ export const practiceAttempts = pgTable("practice_attempts", {
   selectedAnswer: text("selected_answer").notNull(),
   correctAnswer: text("correct_answer").notNull(),
   isCorrect: boolean("is_correct").notNull(),
+  evaluation: jsonb("evaluation"),
   responseTimeMs: integer("response_time_ms"),
   answeredAt: timestamp("answered_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [
