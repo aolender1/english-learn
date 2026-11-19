@@ -17,3 +17,29 @@ export async function getSessionUser(): Promise<AppUser | null> {
 export function jsonError(message: string, status: number): Response {
   return Response.json({ error: message }, { status })
 }
+
+export async function requireAuthorizedAiUser(): Promise<
+  | { user: AppUser; errorResponse: null }
+  | { user: null; errorResponse: Response }
+> {
+  const user = await getSessionUser().catch(() => null)
+  if (!user) {
+    return {
+      user: null,
+      errorResponse: jsonError(
+        "Iniciá sesión como alumno invitado o profesor autorizado para usar funciones de IA.",
+        401,
+      ),
+    }
+  }
+  if (user.role !== "teacher" && user.role !== "student") {
+    return {
+      user: null,
+      errorResponse: jsonError(
+        "Tu cuenta no tiene permisos para usar funciones de IA.",
+        403,
+      ),
+    }
+  }
+  return { user, errorResponse: null }
+}

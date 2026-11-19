@@ -9,6 +9,7 @@ import {
   Check,
   CheckCircle2,
   ChevronRight,
+  Clock,
   Edit2,
   Filter,
   ImageIcon,
@@ -16,6 +17,7 @@ import {
   Lightbulb,
   ListOrdered,
   Mail,
+  Mic,
   MoveRight,
   Plus,
   RotateCcw,
@@ -100,6 +102,30 @@ type StudentDetail = {
     correct: number
     accuracy: number
   }>
+  speakingSessions?: Array<{
+    id: string
+    level: string
+    topicSlug: string
+    topicTitle: string
+    missionTitle: string
+    voiceName: string
+    status: string
+    durationSec: number
+    turnCount: number
+    transcript: Array<{ role: "user" | "model"; text: string; ts: number }>
+    checklist: Array<{ id: string; labelEs: string; completed: boolean }>
+    evaluation?: {
+      missionCompleted?: boolean
+      grammarScore?: number
+      communicationScore?: number
+      vocabularyScore?: number
+      overallScore?: number
+      errorLabelEs?: string
+      errorTipEs?: string
+    } | null
+    startedAt: string
+    completedAt: string | null
+  }>
 }
 
 type TopicItem = {
@@ -170,6 +196,7 @@ export function TeacherDashboard({ teacherEmail }: { teacherEmail: string }) {
   const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null)
   const [studentDetail, setStudentDetail] = useState<StudentDetail | null>(null)
   const [loadingStudentDetail, setLoadingStudentDetail] = useState(false)
+  const [expandedSpeakingId, setExpandedSpeakingId] = useState<string | null>(null)
   
   // Topics tab state
   const [topics, setTopics] = useState<TopicItem[]>([])
@@ -407,6 +434,7 @@ export function TeacherDashboard({ teacherEmail }: { teacherEmail: string }) {
   // Student details fetcher
   async function inspectStudent(studentId: string) {
     setSelectedStudentId(studentId)
+    setExpandedSpeakingId(null)
     setLoadingStudentDetail(true)
     try {
       const res = await fetch(`/api/teacher/students/${studentId}`)
@@ -956,6 +984,99 @@ export function TeacherDashboard({ teacherEmail }: { teacherEmail: string }) {
                     </tbody>
                   </table>
                 </div>
+              </div>
+
+              {/* Live Speaking Sessions (Gemini 3.8 Live + Decision 1) */}
+              <div className="flex flex-col gap-3">
+                <h3 className="text-lg font-semibold tracking-tight flex items-center gap-2">
+                  <Mic size={18} className="text-primary" />
+                  Live Speaking Sessions (Gemini 3.8 Live + Decision 1)
+                </h3>
+                {!studentDetail.speakingSessions || studentDetail.speakingSessions.length === 0 ? (
+                  <p className="text-sm text-muted-foreground border border-dashed border-border p-4">
+                    No live voice practice sessions recorded yet.
+                  </p>
+                ) : (
+                  <div className="flex flex-col gap-3">
+                    {studentDetail.speakingSessions.map((s) => {
+                      const isExpanded = expandedSpeakingId === s.id
+                      const achievedCount = Array.isArray(s.checklist)
+                        ? s.checklist.filter((c) => c.completed).length
+                        : 0
+                      const totalGoals = Array.isArray(s.checklist) ? s.checklist.length : 0
+                      const mins = Math.floor((s.durationSec ?? 0) / 60)
+                      const secs = (s.durationSec ?? 0) % 60
+                      return (
+                        <div key={s.id} className="border border-border bg-card p-5 flex flex-col gap-3">
+                          <div className="flex flex-wrap items-center justify-between gap-3">
+                            <div className="flex flex-col gap-1">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className="font-semibold text-sm">{s.topicTitle}</span>
+                                <span className="tag text-[10px] font-mono">{s.level}</span>
+                                <span className={`tag text-[10px] font-mono ${s.status === "completed" ? "text-primary border-primary" : ""}`}>
+                                  {s.status}
+                                </span>
+                              </div>
+                              <p className="text-xs text-muted-foreground flex flex-wrap items-center gap-3">
+                                <span className="inline-flex items-center gap-1">
+                                  <Clock size={12} /> {mins}m {secs}s
+                                </span>
+                                <span>{s.turnCount} student turns</span>
+                                <span>Voice: {s.voiceName}</span>
+                                <span>Objectives: {achievedCount}/{totalGoals}</span>
+                              </p>
+                            </div>
+
+                            <div className="flex flex-wrap items-center gap-2">
+                              {s.evaluation && typeof s.evaluation.overallScore === "number" && (
+                                <span className="tag font-mono text-xs text-primary border-primary">
+                                  Overall {s.evaluation.overallScore.toFixed(1)}/3.0
+                                </span>
+                              )}
+                              {s.evaluation?.errorLabelEs && (
+                                <span className="tag font-mono text-[10px]">
+                                  {s.evaluation.errorLabelEs}
+                                </span>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => setExpandedSpeakingId(isExpanded ? null : s.id)}
+                                className="button-secondary py-1 px-3 text-xs min-h-8"
+                              >
+                                {isExpanded ? "Hide transcript" : "View transcript"}
+                              </button>
+                            </div>
+                          </div>
+
+                          {s.evaluation && (
+                            <div className="grid gap-2 sm:grid-cols-3 text-xs font-mono bg-secondary/40 p-3 rounded border border-border/60">
+                              <span>Grammar: {Number(s.evaluation.grammarScore ?? 0).toFixed(1)}/3</span>
+                              <span>Fluency: {Number(s.evaluation.communicationScore ?? 0).toFixed(1)}/3</span>
+                              <span>Vocabulary: {Number(s.evaluation.vocabularyScore ?? 0).toFixed(1)}/3</span>
+                            </div>
+                          )}
+
+                          {isExpanded && (
+                            <div className="border-t border-border pt-3 flex flex-col gap-2 max-h-64 overflow-y-auto">
+                              {Array.isArray(s.transcript) && s.transcript.length > 0 ? (
+                                s.transcript.map((t, idx) => (
+                                  <div key={`${t.ts}-${idx}`} className="text-xs leading-relaxed">
+                                    <strong className={t.role === "user" ? "text-primary" : "text-muted-foreground"}>
+                                      {t.role === "user" ? "Student: " : "Tutor IA: "}
+                                    </strong>
+                                    <span>{t.text}</span>
+                                  </div>
+                                ))
+                              ) : (
+                                <p className="text-xs text-muted-foreground">Empty transcript.</p>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
               </div>
             </div>
           ) : (

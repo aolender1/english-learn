@@ -1,7 +1,7 @@
 import { and, desc, eq, inArray } from "drizzle-orm"
 
 import { db } from "@/lib/db"
-import { exercises, practiceAttempts, practiceRounds, teacherStudents, userProfiles } from "@/lib/db/schema"
+import { exercises, practiceAttempts, practiceRounds, speakingSessions, teacherStudents, userProfiles } from "@/lib/db/schema"
 import { getSessionUser, jsonError } from "@/lib/api-auth"
 import { topicCatalog } from "@/lib/topics"
 
@@ -149,6 +149,28 @@ export async function GET(
       accuracy: t.total > 0 ? Math.round((t.correct / t.total) * 100) : 0,
     }))
 
+    // Live Speaking Sessions (Gemini 3.8 Live + Decision 1)
+    const spokenRows = await db
+      .select({
+        id: speakingSessions.id,
+        level: speakingSessions.level,
+        topicSlug: speakingSessions.topicSlug,
+        missionTitle: speakingSessions.missionTitle,
+        voiceName: speakingSessions.voiceName,
+        status: speakingSessions.status,
+        durationSec: speakingSessions.durationSec,
+        turnCount: speakingSessions.turnCount,
+        transcript: speakingSessions.transcript,
+        checklist: speakingSessions.checklist,
+        evaluation: speakingSessions.evaluation,
+        startedAt: speakingSessions.startedAt,
+        completedAt: speakingSessions.completedAt,
+      })
+      .from(speakingSessions)
+      .where(eq(speakingSessions.userId, studentId))
+      .orderBy(desc(speakingSessions.startedAt))
+      .limit(20)
+
     return Response.json({
       student: profile,
       totalSessions: rounds.filter((r) => r.status === "completed").length,
@@ -161,6 +183,10 @@ export async function GET(
       })),
       mistakes,
       topicStats,
+      speakingSessions: spokenRows.map((s) => ({
+        ...s,
+        topicTitle: topicMap.get(s.topicSlug) ?? s.topicSlug,
+      })),
     })
   } catch (error) {
     console.error("[api/teacher/students/[studentId] GET]", error)

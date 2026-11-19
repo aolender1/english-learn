@@ -149,3 +149,25 @@ export const practiceAttempts = pgTable("practice_attempts", {
   unique("exercise_attempts_round_id_exercise_id_key").on(table.roundId, table.exerciseId),
   index("idx_exercise_attempts_user").on(table.userId, table.answeredAt),
 ])
+
+export const speakingSessions = pgTable("speaking_sessions", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id").notNull(),
+  level: text("level").notNull(),
+  topicSlug: text("topic_slug").notNull(),
+  missionTitle: text("mission_title").notNull(),
+  missionGoal: text("mission_goal").notNull(),
+  voiceName: text("voice_name").notNull().default("Aoede"),
+  status: text("status").notNull().default("active"),
+  durationSec: integer("duration_sec").notNull().default(0),
+  turnCount: integer("turn_count").notNull().default(0),
+  transcript: jsonb("transcript").notNull().default(sql`'[]'::jsonb`),
+  checklist: jsonb("checklist").notNull().default(sql`'[]'::jsonb`),
+  evaluation: jsonb("evaluation"),
+  startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
+  completedAt: timestamp("completed_at", { withTimezone: true }),
+}, (table) => [
+  check("speaking_sessions_status_check", sql`${table.status} in ('active', 'completed', 'abandoned')`),
+  index("idx_speaking_sessions_user").on(table.userId, table.startedAt),
+  index("idx_speaking_sessions_topic").on(table.topicSlug, table.level),
+])

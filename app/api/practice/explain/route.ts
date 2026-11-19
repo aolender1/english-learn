@@ -1,7 +1,10 @@
-import { jsonError } from "@/lib/api-auth"
+import { jsonError, requireAuthorizedAiUser } from "@/lib/api-auth"
 import { explainStudentMistake } from "@/lib/gemini"
 
 export async function POST(request: Request) {
+  const auth = await requireAuthorizedAiUser()
+  if (auth.errorResponse) return auth.errorResponse
+
   let body: {
     prompt?: string
     expectedAnswer?: string

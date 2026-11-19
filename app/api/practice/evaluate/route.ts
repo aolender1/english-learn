@@ -1,6 +1,6 @@
 import { and, eq } from "drizzle-orm"
 
-import { getSessionUser, jsonError } from "@/lib/api-auth"
+import { jsonError, requireAuthorizedAiUser } from "@/lib/api-auth"
 import { db } from "@/lib/db"
 import { exercises, practiceAttempts, practiceRounds, topics as topicsTable } from "@/lib/db/schema"
 import { evaluateOpenAnswer } from "@/lib/gemini-decisions"
@@ -10,7 +10,9 @@ import { findTopic } from "@/lib/topics"
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 export async function POST(request: Request) {
-  const user = await getSessionUser().catch(() => null)
+  const auth = await requireAuthorizedAiUser()
+  if (auth.errorResponse) return auth.errorResponse
+  const user = auth.user
 
   let body: {
     roundId?: string | null

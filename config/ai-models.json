@@ -35,6 +35,14 @@
       "primaryModel": "gemini-decision-1",
       "fallbackModels": [],
       "envOverride": "GEMINI_DECISION_MODEL"
+    },
+    "live": {
+      "id": "live",
+      "name": "Práctica Oral en Vivo (Live API)",
+      "description": "Conversaciones guiadas en tiempo real voz-a-voz con transcripción bidireccional calibradas por nivel MCER.",
+      "primaryModel": "gemini-3.8-live",
+      "fallbackModels": [],
+      "envOverride": "GEMINI_LIVE_MODEL"
     }
   },
   "models": {
@@ -88,6 +96,19 @@
         "Razonamiento lingüístico sólido",
         "Cumplimiento estricto de distractores pedagógicos",
         "Explicaciones bilingües detalladas"
+      ]
+    },
+    "gemini-3.8-live": {
+      "id": "gemini-3.8-live",
+      "name": "Gemini 3.8 Live",
+      "tier": "live",
+      "role": "Tutor conversacional voz-a-voz en tiempo real",
+      "description": "Modelo multimodal bidireccional de ultra baja latencia por WebSocket con transcripción de entrada/salida para misiones orales guiadas por nivel MCER.",
+      "contextWindow": "128K tokens",
+      "strengths": [
+        "Voz bidireccional en tiempo real (PCM 16kHz / 24kHz)",
+        "Transcripción simultánea del alumno y del tutor",
+        "Audio proactivo y diálogo expresivo natural"
       ]
     }
   }

@@ -44,11 +44,12 @@ import {
   type Progress,
 } from "@/lib/progress"
 import { TopicTheory } from "@/components/topic-theory"
+import { LiveVoicePractice } from "@/components/live-voice-practice"
 import { AudioWordBadge } from "@/components/audio-word-badge"
 import { DictionaryDialog } from "@/components/dictionary-dialog"
 import { ExerciseMediaCard } from "@/components/exercise-media-card"
 
-type View = "home" | "level" | "theory" | "quiz" | "results"
+type View = "home" | "level" | "theory" | "quiz" | "results" | "live"
 type AnswerRecord = {
   question: Question
   selected: number
@@ -220,9 +221,15 @@ export function GameApp({
     }
   }, [initialLevel, initialTopicSlug, initialView])
 
+  useEffect(() => {
+    if (!user && inputMode === "write") {
+      setInputMode("options")
+    }
+  }, [user, inputMode])
+
   const current = session[index]
   const isNativeOpen = current ? current.exerciseType === "open_response" || current.options.length === 0 : false
-  const useWriteInput = isNativeOpen || inputMode === "write"
+  const useWriteInput = isNativeOpen || (Boolean(user) && inputMode === "write")
   const isAnswered = selected !== null || currentEvaluation !== null
   const expectedModelAnswer = current ? current.expectedAnswer || current.options[current.answer] || "" : ""
   const score = answers.filter((answer) => answer.correct).length
@@ -930,6 +937,13 @@ export function GameApp({
           level={level}
           topic={currentTopic}
           isTeacher={user?.role === "teacher"}
+          canUseAi={Boolean(user)}
+          onStartLivePractice={() => {
+            if (user && currentTopic) {
+              setSessionError(null)
+              setView("live")
+            }
+          }}
           onTopicUpdated={(updated) => {
             setCurrentTopic(updated)
             if (updated.level && updated.level !== level) {
@@ -953,6 +967,34 @@ export function GameApp({
           starting={starting}
           sessionError={sessionError}
         />
+      )}
+
+      {view === "live" && currentTopic && (
+        user ? (
+          <LiveVoicePractice
+            level={level}
+            topic={currentTopic}
+            userName={user.name}
+            onBack={() => setView("theory")}
+            onStartWrittenPractice={() => void start(level, currentTopic)}
+          />
+        ) : (
+          <div className="mx-auto flex max-w-xl flex-col items-center gap-4 px-5 py-16 text-center">
+            <Lock size={28} className="text-primary" />
+            <h1 className="font-serif text-3xl">Práctica oral exclusiva para usuarios autorizados</h1>
+            <p className="text-sm text-muted-foreground">
+              Iniciá sesión con tu cuenta de alumno invitado o profesor para usar Gemini 3.8 Live.
+            </p>
+            <div className="flex flex-wrap gap-3 pt-2">
+              <a href="/auth/sign-in" className="button-primary">
+                Iniciar sesión
+              </a>
+              <button type="button" onClick={() => setView("theory")} className="button-secondary">
+                <ArrowLeft size={16} /> Volver a la teoría
+              </button>
+            </div>
+          </div>
+        )
       )}
 
       {view === "quiz" && !current && (
@@ -1082,18 +1124,24 @@ export function GameApp({
                     </button>
                     <button
                       type="button"
-                      disabled={isAnswered}
+                      disabled={isAnswered || !user}
                       onClick={() => {
+                        if (!user) return
                         setInputMode("write")
                         setEvalError(null)
                       }}
+                      title={
+                        !user
+                          ? "Disponible solo para alumnos y profesores autorizados"
+                          : "Escribí tu respuesta evaluada por Gemini Decision 1"
+                      }
                       className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-sm font-medium transition-colors ${
                         useWriteInput
                           ? "bg-card text-primary shadow-xs"
                           : "text-muted-foreground hover:text-foreground"
                       } disabled:opacity-60`}
                     >
-                      <Keyboard size={13} aria-hidden="true" />
+                      {user ? <Keyboard size={13} aria-hidden="true" /> : <Lock size={12} aria-hidden="true" />}
                       Modo Escritura (IA)
                     </button>
                   </div>
@@ -1144,24 +1192,34 @@ export function GameApp({
                           {current.explanation}
                         </p>
                         {selected !== current.answer && !aiExplanation && (
-                          <button
-                            type="button"
-                            onClick={requestAiExplanation}
-                            disabled={loadingAiExplanation}
-                            className="mt-3 inline-flex items-center gap-1.5 text-xs font-semibold text-primary hover:underline disabled:opacity-60"
-                          >
-                            {loadingAiExplanation ? (
-                              <>
-                                <Loader2 size={13} className="animate-spin" aria-hidden="true" />
-                                Generando explicación personalizada…
-                              </>
-                            ) : (
-                              <>
-                                <MessageSquareMore size={13} aria-hidden="true" />
-                                Explicame mi error con IA
-                              </>
-                            )}
-                          </button>
+                          user ? (
+                            <button
+                              type="button"
+                              onClick={requestAiExplanation}
+                              disabled={loadingAiExplanation}
+                              className="mt-3 inline-flex items-center gap-1.5 text-xs font-semibold text-primary hover:underline disabled:opacity-60"
+                            >
+                              {loadingAiExplanation ? (
+                                <>
+                                  <Loader2 size={13} className="animate-spin" aria-hidden="true" />
+                                  Generando explicación personalizada…
+                                </>
+                              ) : (
+                                <>
+                                  <MessageSquareMore size={13} aria-hidden="true" />
+                                  Explicame mi error con IA
+                                </>
+                              )}
+                            </button>
+                          ) : (
+                            <a
+                              href="/auth/sign-in"
+                              className="mt-3 inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-primary"
+                            >
+                              <Lock size={12} aria-hidden="true" />
+                              Iniciá sesión para explicaciones con IA
+                            </a>
+                          )
                         )}
                         {aiExplanation && (
                           <div className="mt-3 rounded border border-primary/25 bg-card p-3 text-xs leading-relaxed text-foreground">
@@ -1185,6 +1243,28 @@ export function GameApp({
                     </div>
                   )}
                 </>
+              ) : !user ? (
+                <div className="flex flex-col gap-4 rounded border border-border bg-card p-5">
+                  <div className="flex items-start gap-3">
+                    <Lock size={18} className="shrink-0 text-primary mt-0.5" aria-hidden="true" />
+                    <div className="flex flex-col gap-1">
+                      <p className="text-sm font-semibold text-foreground">
+                        Ejercicio abierto con evaluación por IA
+                      </p>
+                      <p className="text-xs leading-relaxed text-muted-foreground">
+                        La corrección automática con Gemini Decision 1 está habilitada únicamente para alumnos y profesores autorizados.
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-3">
+                    <a href="/auth/sign-in" className="button-primary">
+                      Iniciar sesión
+                    </a>
+                    <button type="button" onClick={next} className="button-secondary">
+                      Saltar pregunta <ArrowRight size={15} aria-hidden="true" />
+                    </button>
+                  </div>
+                </div>
               ) : (
                 <>
                   <form onSubmit={submitOpenAnswer} className="flex flex-col gap-3">
@@ -1317,7 +1397,7 @@ export function GameApp({
                         </p>
                       </div>
 
-                      {currentEvaluation.needsAiExplanation && !aiExplanation && (
+                      {user && currentEvaluation.needsAiExplanation && !aiExplanation && (
                         <button
                           type="button"
                           onClick={requestAiExplanation}

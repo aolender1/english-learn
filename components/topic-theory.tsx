@@ -10,6 +10,8 @@ import {
   ImageIcon,
   Lightbulb,
   Loader2,
+  Lock,
+  Mic,
   Plus,
   Save,
   Sparkles,
@@ -26,6 +28,8 @@ type TopicTheoryProps = {
   level: CefrLevel
   topic: TopicDef
   onStartPractice: () => void
+  onStartLivePractice?: () => void
+  canUseAi?: boolean
   onBack: () => void
   isTeacher?: boolean
   onTopicUpdated?: (updatedTopic: TopicDef) => void
@@ -37,6 +41,8 @@ export function TopicTheory({
   level,
   topic,
   onStartPractice,
+  onStartLivePractice,
+  canUseAi = false,
   onBack,
   isTeacher = false,
   onTopicUpdated,
@@ -649,19 +655,42 @@ export function TopicTheory({
               <ArrowLeft size={16} /> All {levelLabel(level)} Topics
             </button>
 
-            <button
-              onClick={onStartPractice}
-              disabled={starting}
-              className="button-primary w-full sm:w-auto py-3 px-6 text-base font-semibold shadow-md flex items-center justify-center gap-2"
-            >
-              {starting ? (
-                "Loading exercises..."
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full sm:w-auto">
+              {canUseAi && onStartLivePractice ? (
+                <button
+                  type="button"
+                  onClick={onStartLivePractice}
+                  disabled={starting}
+                  className="button-secondary w-full sm:w-auto py-3 px-5 text-sm font-semibold border-primary/50 text-primary hover:bg-primary/10"
+                >
+                  <Mic size={17} />
+                  Práctica oral en vivo
+                </button>
               ) : (
-                <>
-                  Empezar a practicar <ArrowRight size={18} />
-                </>
+                <a
+                  href="/auth/sign-in"
+                  className="button-secondary w-full sm:w-auto py-3 px-4 text-xs font-medium text-muted-foreground"
+                  title="Iniciá sesión como alumno o profesor autorizado para practicar por voz con IA"
+                >
+                  <Lock size={14} />
+                  Práctica oral en vivo (Iniciá sesión)
+                </a>
               )}
-            </button>
+
+              <button
+                onClick={onStartPractice}
+                disabled={starting}
+                className="button-primary w-full sm:w-auto py-3 px-6 text-base font-semibold shadow-md flex items-center justify-center gap-2"
+              >
+                {starting ? (
+                  "Loading exercises..."
+                ) : (
+                  <>
+                    Empezar a practicar <ArrowRight size={18} />
+                  </>
+                )}
+              </button>
+            </div>
           </div>
         </>
       )}

@@ -1,4 +1,5 @@
 import aiModelsConfig from "@/config/ai-models.json"
+import type { ChecklistItemState, SpeakingMission, TranscriptTurn } from "./live-missions"
 import type { CefrLevel } from "./question-bank"
 
 const DECISIONS_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/decisions"
@@ -711,6 +712,297 @@ export async function selectBestVisualWithDecision(params: {
     usage: {
       inputTokens: response.usage?.total_input_tokens ?? response.usage?.total_tokens ?? 0,
       outputTokens: response.usage?.total_output_tokens ?? 0,
+    },
+  }
+}
+
+export type LiveTurnEvaluation = {
+  checklist: ChecklistItemState[]
+  usedTargetGrammarProb: number
+  needsHint: boolean
+  latencyMs: number
+  usage?: { inputTokens: number; outputTokens: number }
+}
+
+export type SpeakingSessionEvaluation = {
+  missionCompleted: boolean
+  missionCompletedProb: number
+  grammarScore: number
+  communicationScore: number
+  vocabularyScore: number
+  overallScore: number
+  maxScore: 3
+  primaryErrorCategory: ErrorCategory
+  errorLabelEs: string
+  errorTipEs: string
+  confidence: number
+  latencyMs: number
+  usage?: { inputTokens: number; outputTokens: number }
+}
+
+function formatTranscriptForDecision(turns: TranscriptTurn[], maxChars: number): string {
+  const lines = turns
+    .map((turn) => {
+      const clean = turn.text.replace(/\s+/g, " ").trim()
+      if (!clean) return ""
+      return `${turn.role === "user" ? "Student" : "Tutor"}: ${clean}`
+    })
+    .filter(Boolean)
+
+  let joined = lines.join("\n")
+  if (joined.length > maxChars) {
+    joined = "...\n" + joined.slice(-maxChars)
+  }
+  return joined
+}
+
+/**
+ * Silent real-time referee powered by Gemini Decision 1 (0 output tokens).
+ * Tracks student progress across the 3 mission objectives and detects if the student needs a Spanish nudge.
+ */
+export async function evaluateLiveTurn(params: {
+  mission: SpeakingMission
+  transcript: TranscriptTurn[]
+  existingChecklist: ChecklistItemState[]
+}): Promise<LiveTurnEvaluation> {
+  const { mission, transcript, existingChecklist } = params
+  const recentTurns = transcript.slice(-12)
+  const latestStudentTurn = [...recentTurns].reverse().find((t) => t.role === "user")?.text.trim() ?? ""
+  const transcriptText = formatTranscriptForDecision(recentTurns, 4_500)
+
+  const input = [
+    `CEFR LEVEL: ${mission.levelDisplay} (${mission.level})`,
+    `TOPIC TITLE: ${mission.topicTitle}`,
+    `TARGET FOCUS: ${mission.topicFocus}`,
+    `MISSION GOAL: ${mission.missionGoal}`,
+    latestStudentTurn ? `LATEST STUDENT UTTERANCE: "${latestStudentTurn}"` : "",
+    ``,
+    `RECENT CONVERSATION TRANSCRIPT:`,
+    transcriptText || "(No dialogue yet)",
+  ]
+    .filter(Boolean)
+    .join("\n")
+
+  const questions: Record<string, DecisionQuestion> = {
+    used_target_grammar: {
+      type: "noul",
+      instructions: `In the latest student utterance or recent turns, did the student apply "${mission.topicTitle}" (${mission.topicFocus}) in English?`,
+      criteria: {
+        true_description: "Student produced English using the target grammar or topic structure meaningfully.",
+        false_description: "Student avoided the target structure, answered only Yes/No, or spoke in Spanish.",
+      },
+    },
+    needs_hint: {
+      type: "noul",
+      instructions: "Does the student's latest turn show confusion, a freeze, a request for help, or mostly Spanish?",
+      criteria: {
+        true_description: "Student appears stuck, asked for help, answered mostly in Spanish, or clearly misunderstood.",
+        false_description: "Student is communicating naturally in English and following the mission.",
+      },
+    },
+  }
+
+  mission.objectives.forEach((obj, idx) => {
+    if (!existingChecklist[idx]?.completed) {
+      questions[`obj_${idx}`] = {
+        type: "noul",
+        instructions: `Has the student achieved objective "${obj.labelEn}" so far in the conversation?`,
+        criteria: {
+          true_description: obj.criterionEn,
+          false_description: "Not yet clearly demonstrated by the student in the transcript.",
+        },
+      }
+    }
+  })
+
+  const t0 = Date.now()
+  const response = await callDecisionsApi(input, questions)
+  const latencyMs = Date.now() - t0
+
+  const updatedChecklist: ChecklistItemState[] = mission.objectives.map((obj, idx) => {
+    const prev = existingChecklist[idx]
+    if (prev?.completed) {
+      return { ...obj, completed: true, probability: Math.max(prev.probability ?? 0.9, 0.9) }
+    }
+    const ans = response.answers?.[`obj_${idx}`]
+    const prob = ans?.type === "noul" ? ans.noul : prev?.probability ?? 0
+    return {
+      ...obj,
+      completed: prob >= 0.72,
+      probability: prob,
+    }
+  })
+
+  const targetAns = response.answers?.used_target_grammar
+  const hintAns = response.answers?.needs_hint
+
+  return {
+    checklist: updatedChecklist,
+    usedTargetGrammarProb: targetAns?.type === "noul" ? targetAns.noul : 0,
+    needsHint: hintAns?.type === "noul" ? hintAns.noul >= 0.72 : false,
+    latencyMs,
+    usage: {
+      inputTokens: response.usage?.total_input_tokens ?? response.usage?.total_tokens ?? 0,
+      outputTokens: response.usage?.total_output_tokens ?? 0,
+    },
+  }
+}
+
+/**
+ * End-of-session speaking rubric evaluator powered by Gemini Decision 1 (0 output tokens).
+ */
+export async function evaluateLiveSession(params: {
+  mission: SpeakingMission
+  transcript: TranscriptTurn[]
+  existingChecklist?: ChecklistItemState[]
+}): Promise<{ evaluation: SpeakingSessionEvaluation; checklist: ChecklistItemState[] }> {
+  const { mission, transcript, existingChecklist = [] } = params
+  const studentTurns = transcript.filter((t) => t.role === "user" && t.text.trim().length > 0)
+  const transcriptText = formatTranscriptForDecision(transcript, 8_000)
+
+  const input = [
+    `CEFR LEVEL: ${mission.levelDisplay} (${mission.level})`,
+    `TOPIC TITLE: ${mission.topicTitle}`,
+    `TARGET FOCUS: ${mission.topicFocus}`,
+    `MISSION GOAL: ${mission.missionGoal}`,
+    `STUDENT SPEAKING TURNS: ${studentTurns.length}`,
+    ``,
+    `FULL CONVERSATION TRANSCRIPT:`,
+    transcriptText,
+  ].join("\n")
+
+  const questions: Record<string, DecisionQuestion> = {
+    mission_completed: {
+      type: "noul",
+      instructions: `Overall, did the student meaningfully engage in English and accomplish the speaking mission for "${mission.topicTitle}"?`,
+      criteria: {
+        true_description:
+          "Student participated across multiple turns in English and demonstrated the topic focus.",
+        false_description:
+          "Session had almost no English output from the student or failed to engage with the topic.",
+      },
+    },
+    grammar_score: {
+      type: "score",
+      instructions: `Score the student's spoken grammar accuracy on "${mission.topicTitle}" (0 to 3) calibrated for ${mission.levelDisplay}.`,
+      criteria: [
+        "0 - Unable to form basic target structures or replied mostly in Spanish/fragments.",
+        "1 - Frequent grammar errors that obscure meaning or rarely applies the target rule.",
+        "2 - Generally accurate for the CEFR level with occasional minor slips.",
+        "3 - Strong, accurate, natural command of the target grammar across turns.",
+      ],
+    },
+    communication_score: {
+      type: "score",
+      instructions: `Score the student's spoken fluency, interaction, and responsiveness (0 to 3) for ${mission.levelDisplay}.`,
+      criteria: [
+        "0 - Minimal or no intelligible English interaction.",
+        "1 - Very hesitant or overly brief replies requiring constant prompting.",
+        "2 - Communicates ideas clearly and sustains the dialogue well.",
+        "3 - Confident, responsive, natural back-and-forth interaction.",
+      ],
+    },
+    vocabulary_score: {
+      type: "score",
+      instructions: `Score the student's topic vocabulary usage and appropriateness (0 to 3) for ${mission.levelDisplay}.`,
+      criteria: [
+        "0 - Relied on Spanish words or severely lacked basic vocabulary.",
+        "1 - Very narrow repetitive words; struggled to express topic ideas.",
+        "2 - Good, appropriate everyday vocabulary for the topic.",
+        "3 - Rich, accurate, well-chosen vocabulary matching the scenario.",
+      ],
+    },
+    primary_error_category: {
+      type: "choice",
+      instructions: "Identify the primary pattern the student should focus on improving next (or 'none' if spoken performance was strong).",
+      criteria: {
+        none: "Strong spoken control with only negligible slips.",
+        wrong_tense: "Verb tense, aspect, or auxiliary selection slips.",
+        word_order: "Sentence or question word-order issues.",
+        missing_or_extra_word: "Omitted auxiliaries, articles, or prepositions.",
+        agreement_or_pronoun: "Subject-verb agreement or pronoun mistakes.",
+        vocabulary_meaning: "Limited or imprecise vocabulary choices.",
+        spelling_minor: "Minor phonetic/form slips without blocking clarity.",
+        spanish_or_incomplete: "Frequent Spanish switches or incomplete sentence fragments.",
+      },
+    },
+  }
+
+  mission.objectives.forEach((obj, idx) => {
+    questions[`obj_${idx}`] = {
+      type: "noul",
+      instructions: `Did the student satisfy objective "${obj.labelEn}" during this speaking session?`,
+      criteria: {
+        true_description: obj.criterionEn,
+        false_description: "Objective was not clearly met during the conversation.",
+      },
+    }
+  })
+
+  const t0 = Date.now()
+  const response = await callDecisionsApi(input, questions)
+  const latencyMs = Date.now() - t0
+
+  const missionAns = response.answers?.mission_completed
+  const grammarAns = response.answers?.grammar_score
+  const commAns = response.answers?.communication_score
+  const vocabAns = response.answers?.vocabulary_score
+  const catAns = response.answers?.primary_error_category
+
+  const round2 = (n: number) => Math.round(n * 100) / 100
+  const grammarScore = round2(grammarAns?.type === "score" ? grammarAns.score : 0)
+  const communicationScore = round2(commAns?.type === "score" ? commAns.score : 0)
+  const vocabularyScore = round2(vocabAns?.type === "score" ? vocabAns.score : 0)
+  const overallScore = round2((grammarScore + communicationScore + vocabularyScore) / 3)
+
+  const missionCompletedProb = missionAns?.type === "noul" ? missionAns.noul : 0
+  const checklist: ChecklistItemState[] = mission.objectives.map((obj, idx) => {
+    const prev = existingChecklist[idx]
+    const ans = response.answers?.[`obj_${idx}`]
+    const prob = ans?.type === "noul" ? ans.noul : prev?.probability ?? 0
+    return {
+      ...obj,
+      completed: Boolean(prev?.completed) || prob >= 0.65,
+      probability: Math.max(prev?.probability ?? 0, prob),
+    }
+  })
+
+  const completedCount = checklist.filter((c) => c.completed).length
+  const missionCompleted = missionCompletedProb >= 0.6 || (completedCount >= 2 && overallScore >= 1.6)
+
+  const rawCategory = catAns?.type === "choice" ? catAns.choice : "none"
+  const primaryErrorCategory: ErrorCategory =
+    rawCategory in ERROR_CATEGORY_META ? (rawCategory as ErrorCategory) : "none"
+  const meta = ERROR_CATEGORY_META[primaryErrorCategory]
+
+  const confidences = [
+    missionAns?.confidence,
+    grammarAns?.confidence,
+    commAns?.confidence,
+    vocabAns?.confidence,
+    catAns?.confidence,
+  ].filter((c): c is number => typeof c === "number")
+  const confidence = confidences.length > 0 ? Math.min(...confidences) : 0.5
+
+  return {
+    checklist,
+    evaluation: {
+      missionCompleted,
+      missionCompletedProb,
+      grammarScore,
+      communicationScore,
+      vocabularyScore,
+      overallScore,
+      maxScore: 3,
+      primaryErrorCategory,
+      errorLabelEs: meta.labelEs,
+      errorTipEs: meta.tipEs,
+      confidence,
+      latencyMs,
+      usage: {
+        inputTokens: response.usage?.total_input_tokens ?? response.usage?.total_tokens ?? 0,
+        outputTokens: response.usage?.total_output_tokens ?? 0,
+      },
     },
   }
 }

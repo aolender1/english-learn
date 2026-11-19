@@ -17,10 +17,12 @@ export async function POST(request: Request) {
     return jsonError("Invalid JSON body.", 400)
   }
 
-  const practiceMode: PracticeMode =
-    body.practiceMode === "open_response" || body.practiceMode === "multiple_choice"
-      ? body.practiceMode
-      : "mixed"
+  const requestedMode = body.practiceMode
+  const practiceMode: PracticeMode = !user
+    ? "multiple_choice"
+    : requestedMode === "open_response" || requestedMode === "multiple_choice"
+    ? requestedMode
+    : "mixed"
 
   const level = cefrLevels.find((item) => item.id === body.level)?.id
   if (!level) return jsonError("Unknown CEFR level.", 400)
