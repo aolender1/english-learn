@@ -401,13 +401,11 @@ function getOpenResponseSchema() {
 }
 
 function resolveModelChain(tier: ExerciseGenTier): string[] {
-  const primary = tier === "heavy" ? HEAVY_MODEL : EXERCISE_MODEL
-  const fallbacks =
-    tier === "heavy"
-      ? [...HEAVY_FALLBACK_MODELS, EXERCISE_MODEL, ...FALLBACK_MODELS]
-      : [...FALLBACK_MODELS, HEAVY_MODEL, ...HEAVY_FALLBACK_MODELS]
-
-  return Array.from(new Set([primary, ...fallbacks].filter(Boolean)))
+  if (tier === "lightweight") {
+    return Array.from(new Set([EXERCISE_MODEL, ...FALLBACK_MODELS].filter(Boolean)))
+  }
+  const heavyChain = [HEAVY_MODEL, ...HEAVY_FALLBACK_MODELS, EXERCISE_MODEL, ...FALLBACK_MODELS]
+  return Array.from(new Set(heavyChain.filter(Boolean)))
 }
 
 async function callGemini(
@@ -481,17 +479,17 @@ async function callWithFallback<T>(
   runner: (model: string, ctx: { isLastModel: boolean; timeoutMs: number }) => Promise<T>,
 ): Promise<{ result: T; modelUsed: string }> {
   let lastError: unknown
-  const deadlineAt = Date.now() + 45_000
+  const deadlineAt = Date.now() + 50_000
 
   for (let i = 0; i < modelsToTry.length; i++) {
     const model = modelsToTry[i]
     const isLastModel = i === modelsToTry.length - 1
     const remainingBudget = Math.max(8_000, deadlineAt - Date.now())
     const preferredTimeout = isLastModel
-      ? 22_000
+      ? 25_000
       : model.startsWith("gemini-4-") || model === "gemini-3.8-flash"
-      ? 10_000
-      : 14_000
+      ? 14_000
+      : 24_000
     const timeoutMs = Math.min(preferredTimeout, remainingBudget)
     const maxAttempts = isLastModel ? 2 : 1
 
@@ -517,6 +515,11 @@ async function callWithFallback<T>(
     }
   }
 
+  if (lastError instanceof Error && lastError.name === "AbortError") {
+    throw new Error(
+      "La generación tardó demasiado y fue cancelada por tiempo límite. Probá nuevamente o elegí 5 o 10 preguntas.",
+    )
+  }
   throw lastError instanceof Error ? lastError : new Error("Gemini call failed")
 }
 
@@ -655,6 +658,18 @@ async function generateSingleBatch(params: {
   return { items: result, modelUsed }
 }
 
+function dedupeExercisesByPrompt(items: GeneratedExerciseItem[]): GeneratedExerciseItem[] {
+  const seen = new Set<string>()
+  const out: GeneratedExerciseItem[] = []
+  for (const item of items) {
+    const key = item.prompt.toLowerCase().replace(/\s+/g, " ").trim()
+    if (!key || seen.has(key)) continue
+    seen.add(key)
+    out.push(item)
+  }
+  return out
+}
+
 /**
  * Generates calibrated CEFR exercises (multiple choice, open response, or mixed)
  * with automatic fallback from Gemini 4 Hydrogen and optional Decision-1 QA auditing.
@@ -679,46 +694,72 @@ export async function generateTopicExercisesDetailed(
   let rawItems: GeneratedExerciseItem[] = []
   let modelUsed = modelsToTry[0] ?? EXERCISE_MODEL
 
+  async function runSettledBatches(
+    batches: Array<{ kind: "multiple_choice" | "open_response"; count: number }>,
+  ): Promise<{ items: GeneratedExerciseItem[]; modelUsed: string }> {
+    const settled = await Promise.allSettled(
+      batches.map((b) =>
+        generateSingleBatch({
+          kind: b.kind,
+          count: b.count,
+          levelId,
+          levelCode,
+          topic,
+          sampleWords,
+          modelsToTry,
+        }),
+      ),
+    )
+
+    const fulfilled = settled.filter(
+      (r): r is PromiseFulfilledResult<{ items: GeneratedExerciseItem[]; modelUsed: string }> =>
+        r.status === "fulfilled" && r.value.items.length > 0,
+    )
+
+    if (fulfilled.length === 0) {
+      const firstRejected = settled.find((r): r is PromiseRejectedResult => r.status === "rejected")
+      throw firstRejected?.reason ?? new Error("AI generation failed to produce valid exercises.")
+    }
+
+    return {
+      items: dedupeExercisesByPrompt(fulfilled.flatMap((r) => r.value.items)),
+      modelUsed: fulfilled[0].value.modelUsed,
+    }
+  }
+
   if (mode === "mixed" && count >= 2) {
     const openCount = Math.ceil(count / 2)
     const mcCount = count - openCount
-
-    const [openBatch, mcBatch] = await Promise.all([
-      generateSingleBatch({
-        kind: "open_response",
-        count: openCount,
-        levelId,
-        levelCode,
-        topic,
-        sampleWords,
-        modelsToTry,
-      }),
-      generateSingleBatch({
-        kind: "multiple_choice",
-        count: mcCount,
-        levelId,
-        levelCode,
-        topic,
-        sampleWords,
-        modelsToTry,
-      }),
+    const combined = await runSettledBatches([
+      { kind: "open_response", count: openCount },
+      { kind: "multiple_choice", count: mcCount },
     ])
-
-    rawItems = [...openBatch.items, ...mcBatch.items]
-    modelUsed = openBatch.modelUsed
+    rawItems = combined.items
+    modelUsed = combined.modelUsed
   } else {
     const kind = mode === "open_response" ? "open_response" : "multiple_choice"
-    const batch = await generateSingleBatch({
-      kind,
-      count,
-      levelId,
-      levelCode,
-      topic,
-      sampleWords,
-      modelsToTry,
-    })
-    rawItems = batch.items
-    modelUsed = batch.modelUsed
+    if (count > 10) {
+      const firstHalf = Math.ceil(count / 2)
+      const secondHalf = count - firstHalf
+      const combined = await runSettledBatches([
+        { kind, count: firstHalf },
+        { kind, count: secondHalf },
+      ])
+      rawItems = combined.items
+      modelUsed = combined.modelUsed
+    } else {
+      const batch = await generateSingleBatch({
+        kind,
+        count,
+        levelId,
+        levelCode,
+        topic,
+        sampleWords,
+        modelsToTry,
+      })
+      rawItems = dedupeExercisesByPrompt(batch.items)
+      modelUsed = batch.modelUsed
+    }
   }
 
   if (!runQa) {

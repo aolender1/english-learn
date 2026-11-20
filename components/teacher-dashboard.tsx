@@ -409,6 +409,18 @@ export function TeacherDashboard({ teacherEmail }: { teacherEmail: string }) {
     void init()
   }, [refreshStudentsAndInvites, refreshTopics])
 
+  // Keep selectedTopicSlug synchronized with the currently selected CEFR level
+  useEffect(() => {
+    const matching = topics.filter((t) => t.level === exerciseLevel)
+    if (matching.length === 0) {
+      if (selectedTopicSlug !== "") setSelectedTopicSlug("")
+      return
+    }
+    if (!matching.some((t) => t.slug === selectedTopicSlug)) {
+      setSelectedTopicSlug(matching[0].slug)
+    }
+  }, [exerciseLevel, topics, selectedTopicSlug])
+
   // Fetch exercises when topic changes
   const fetchExercisesForTopic = useCallback(async (slug: string, lvl: CefrLevel) => {
     if (!slug) return
