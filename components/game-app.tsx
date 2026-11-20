@@ -57,7 +57,13 @@ type AnswerRecord = {
   typedAnswer?: string
   evaluation?: DecisionEvaluation
 }
-type SessionUser = { id: string; email: string; name: string | null; role: "teacher" | "student" }
+type SessionUser = {
+  id: string
+  email: string
+  name: string | null
+  role: "teacher" | "student"
+  status?: "active" | "paused"
+}
 
 const ROUND_KEY = "wordshift-active-round-id"
 const TOPIC_KEY = "wordshift-active-topic-slug"
@@ -221,15 +227,18 @@ export function GameApp({
     }
   }, [initialLevel, initialTopicSlug, initialView])
 
+  const isPausedStudent = user?.role === "student" && user.status === "paused"
+  const canUseAi = Boolean(user && !isPausedStudent)
+
   useEffect(() => {
-    if (!user && inputMode === "write") {
+    if (!canUseAi && inputMode === "write") {
       setInputMode("options")
     }
-  }, [user, inputMode])
+  }, [canUseAi, inputMode])
 
   const current = session[index]
   const isNativeOpen = current ? current.exerciseType === "open_response" || current.options.length === 0 : false
-  const useWriteInput = isNativeOpen || (Boolean(user) && inputMode === "write")
+  const useWriteInput = isNativeOpen || (canUseAi && inputMode === "write")
   const isAnswered = selected !== null || currentEvaluation !== null
   const expectedModelAnswer = current ? current.expectedAnswer || current.options[current.answer] || "" : ""
   const score = answers.filter((answer) => answer.correct).length
@@ -668,6 +677,9 @@ export function GameApp({
             {user ? (
               <>
                 <span className="tag max-w-44 truncate">{user.name || user.email}</span>
+                {isPausedStudent && (
+                  <span className="tag border-amber-500/40 bg-amber-50 text-amber-800">Pausado</span>
+                )}
                 <button className="icon-button size-9" onClick={signOut} aria-label="Sign out">
                   <LogOut size={15} aria-hidden="true" />
                 </button>
@@ -937,9 +949,10 @@ export function GameApp({
           level={level}
           topic={currentTopic}
           isTeacher={user?.role === "teacher"}
-          canUseAi={Boolean(user)}
+          canUseAi={canUseAi}
+          aiLockedReason={isPausedStudent ? "paused" : "guest"}
           onStartLivePractice={() => {
-            if (user && currentTopic) {
+            if (canUseAi && currentTopic) {
               setSessionError(null)
               setView("live")
             }
@@ -970,7 +983,7 @@ export function GameApp({
       )}
 
       {view === "live" && currentTopic && (
-        user ? (
+        canUseAi && user ? (
           <LiveVoicePractice
             level={level}
             topic={currentTopic}
@@ -981,14 +994,22 @@ export function GameApp({
         ) : (
           <div className="mx-auto flex max-w-xl flex-col items-center gap-4 px-5 py-16 text-center">
             <Lock size={28} className="text-primary" />
-            <h1 className="font-serif text-3xl">Práctica oral exclusiva para usuarios autorizados</h1>
+            <h1 className="font-serif text-3xl">
+              {isPausedStudent
+                ? "Tu cuenta está pausada temporalmente"
+                : "Práctica oral exclusiva para usuarios autorizados"}
+            </h1>
             <p className="text-sm text-muted-foreground">
-              Iniciá sesión con tu cuenta de alumno invitado o profesor para usar Gemini 3.8 Live.
+              {isPausedStudent
+                ? "Tu profesor pausó el acceso a las funciones con IA. Pedile que reactive tu cuenta desde el panel docente."
+                : "Iniciá sesión con tu cuenta de alumno invitado o profesor para usar Gemini 3.8 Live."}
             </p>
             <div className="flex flex-wrap gap-3 pt-2">
-              <a href="/auth/sign-in" className="button-primary">
-                Iniciar sesión
-              </a>
+              {!user && (
+                <a href="/auth/sign-in" className="button-primary">
+                  Iniciar sesión
+                </a>
+              )}
               <button type="button" onClick={() => setView("theory")} className="button-secondary">
                 <ArrowLeft size={16} /> Volver a la teoría
               </button>
@@ -1124,14 +1145,16 @@ export function GameApp({
                     </button>
                     <button
                       type="button"
-                      disabled={isAnswered || !user}
+                      disabled={isAnswered || !canUseAi}
                       onClick={() => {
-                        if (!user) return
+                        if (!canUseAi) return
                         setInputMode("write")
                         setEvalError(null)
                       }}
                       title={
-                        !user
+                        isPausedStudent
+                          ? "Tu cuenta está pausada temporalmente por tu profesor"
+                          : !user
                           ? "Disponible solo para alumnos y profesores autorizados"
                           : "Escribí tu respuesta evaluada por Gemini Decision 1"
                       }
@@ -1141,7 +1164,7 @@ export function GameApp({
                           : "text-muted-foreground hover:text-foreground"
                       } disabled:opacity-60`}
                     >
-                      {user ? <Keyboard size={13} aria-hidden="true" /> : <Lock size={12} aria-hidden="true" />}
+                      {canUseAi ? <Keyboard size={13} aria-hidden="true" /> : <Lock size={12} aria-hidden="true" />}
                       Modo Escritura (IA)
                     </button>
                   </div>
@@ -1192,7 +1215,7 @@ export function GameApp({
                           {current.explanation}
                         </p>
                         {selected !== current.answer && !aiExplanation && (
-                          user ? (
+                          canUseAi ? (
                             <button
                               type="button"
                               onClick={requestAiExplanation}
@@ -1211,6 +1234,11 @@ export function GameApp({
                                 </>
                               )}
                             </button>
+                          ) : isPausedStudent ? (
+                            <span className="mt-3 inline-flex items-center gap-1.5 text-xs font-medium text-amber-800">
+                              <Lock size={12} aria-hidden="true" />
+                              Explicaciones con IA pausadas por tu profesor
+                            </span>
                           ) : (
                             <a
                               href="/auth/sign-in"
@@ -1243,23 +1271,29 @@ export function GameApp({
                     </div>
                   )}
                 </>
-              ) : !user ? (
+              ) : !canUseAi ? (
                 <div className="flex flex-col gap-4 rounded border border-border bg-card p-5">
                   <div className="flex items-start gap-3">
                     <Lock size={18} className="shrink-0 text-primary mt-0.5" aria-hidden="true" />
                     <div className="flex flex-col gap-1">
                       <p className="text-sm font-semibold text-foreground">
-                        Ejercicio abierto con evaluación por IA
+                        {isPausedStudent
+                          ? "Cuenta pausada temporalmente"
+                          : "Ejercicio abierto con evaluación por IA"}
                       </p>
                       <p className="text-xs leading-relaxed text-muted-foreground">
-                        La corrección automática con Gemini Decision 1 está habilitada únicamente para alumnos y profesores autorizados.
+                        {isPausedStudent
+                          ? "Tu profesor pausó tu acceso a ejercicios evaluados con IA. Pedile que lo reactive para responder este formato."
+                          : "La corrección automática con Gemini Decision 1 está habilitada únicamente para alumnos y profesores autorizados."}
                       </p>
                     </div>
                   </div>
                   <div className="flex flex-wrap items-center gap-3">
-                    <a href="/auth/sign-in" className="button-primary">
-                      Iniciar sesión
-                    </a>
+                    {!user && (
+                      <a href="/auth/sign-in" className="button-primary">
+                        Iniciar sesión
+                      </a>
+                    )}
                     <button type="button" onClick={next} className="button-secondary">
                       Saltar pregunta <ArrowRight size={15} aria-hidden="true" />
                     </button>
@@ -1397,7 +1431,7 @@ export function GameApp({
                         </p>
                       </div>
 
-                      {user && currentEvaluation.needsAiExplanation && !aiExplanation && (
+                      {canUseAi && currentEvaluation.needsAiExplanation && !aiExplanation && (
                         <button
                           type="button"
                           onClick={requestAiExplanation}

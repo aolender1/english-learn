@@ -17,12 +17,14 @@ export async function POST(request: Request) {
     return jsonError("Invalid JSON body.", 400)
   }
 
+  const isPausedStudent = user?.role === "student" && user.status === "paused"
   const requestedMode = body.practiceMode
-  const practiceMode: PracticeMode = !user
-    ? "multiple_choice"
-    : requestedMode === "open_response" || requestedMode === "multiple_choice"
-    ? requestedMode
-    : "mixed"
+  const practiceMode: PracticeMode =
+    !user || isPausedStudent
+      ? "multiple_choice"
+      : requestedMode === "open_response" || requestedMode === "multiple_choice"
+      ? requestedMode
+      : "mixed"
 
   const level = cefrLevels.find((item) => item.id === body.level)?.id
   if (!level) return jsonError("Unknown CEFR level.", 400)
@@ -55,8 +57,8 @@ export async function POST(request: Request) {
 
     let roundId: string | null = null
 
-    // Track round in DB if user is logged in
-    if (user?.id) {
+    // Track round in DB if user is active
+    if (user?.id && !isPausedStudent) {
       const [round] = await db
         .insert(practiceRounds)
         .values({

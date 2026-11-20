@@ -6,11 +6,13 @@ export const userProfiles = pgTable("user_profiles", {
   email: text("email").notNull().unique(),
   name: text("name"),
   role: text("role").notNull(),
+  status: text("status").notNull().default("active"),
   onboardingComplete: boolean("onboarding_complete").notNull().default(false),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [
   check("user_profiles_role_check", sql`${table.role} in ('teacher', 'student')`),
+  check("user_profiles_status_check", sql`${table.status} in ('active', 'paused')`),
 ])
 
 export const teacherStudents = pgTable("teacher_students", {

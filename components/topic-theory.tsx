@@ -30,6 +30,7 @@ type TopicTheoryProps = {
   onStartPractice: () => void
   onStartLivePractice?: () => void
   canUseAi?: boolean
+  aiLockedReason?: "guest" | "paused"
   onBack: () => void
   isTeacher?: boolean
   onTopicUpdated?: (updatedTopic: TopicDef) => void
@@ -43,6 +44,7 @@ export function TopicTheory({
   onStartPractice,
   onStartLivePractice,
   canUseAi = false,
+  aiLockedReason = "guest",
   onBack,
   isTeacher = false,
   onTopicUpdated,
@@ -666,6 +668,14 @@ export function TopicTheory({
                   <Mic size={17} />
                   Práctica oral en vivo
                 </button>
+              ) : aiLockedReason === "paused" ? (
+                <span
+                  className="button-secondary w-full sm:w-auto py-3 px-4 text-xs font-medium text-amber-800 border-amber-500/40 bg-amber-50 cursor-default"
+                  title="Tu cuenta está pausada temporalmente por tu profesor"
+                >
+                  <Lock size={14} />
+                  Práctica oral pausada por tu profesor
+                </span>
               ) : (
                 <a
                   href="/auth/sign-in"

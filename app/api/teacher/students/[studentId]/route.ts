@@ -1,7 +1,15 @@
 import { and, desc, eq, inArray } from "drizzle-orm"
 
 import { db } from "@/lib/db"
-import { exercises, practiceAttempts, practiceRounds, speakingSessions, teacherStudents, userProfiles } from "@/lib/db/schema"
+import {
+  exercises,
+  practiceAttempts,
+  practiceRounds,
+  speakingSessions,
+  studentInvitations,
+  teacherStudents,
+  userProfiles,
+} from "@/lib/db/schema"
 import { getSessionUser, jsonError } from "@/lib/api-auth"
 import { topicCatalog } from "@/lib/topics"
 
@@ -37,6 +45,7 @@ export async function GET(
         userId: userProfiles.userId,
         email: userProfiles.email,
         name: userProfiles.name,
+        status: userProfiles.status,
         joined: teacherStudents.createdAt,
       })
       .from(teacherStudents)
@@ -191,5 +200,132 @@ export async function GET(
   } catch (error) {
     console.error("[api/teacher/students/[studentId] GET]", error)
     return jsonError("Failed to fetch student details.", 500)
+  }
+}
+
+export async function PATCH(
+  request: Request,
+  props: { params: Promise<{ studentId: string }> },
+) {
+  const user = await getSessionUser()
+  if (!user || user.role !== "teacher") {
+    return jsonError("Teacher access required.", 403)
+  }
+
+  const { studentId } = await props.params
+  if (!studentId) {
+    return jsonError("Student ID is required.", 400)
+  }
+
+  let body: { status?: string }
+  try {
+    body = await request.json()
+  } catch {
+    return jsonError("Invalid JSON body.", 400)
+  }
+
+  const nextStatus = body.status === "paused" ? "paused" : body.status === "active" ? "active" : null
+  if (!nextStatus) {
+    return jsonError("Status must be 'active' or 'paused'.", 400)
+  }
+
+  try {
+    const [relation] = await db
+      .select()
+      .from(teacherStudents)
+      .where(and(eq(teacherStudents.teacherUserId, user.id), eq(teacherStudents.studentUserId, studentId)))
+      .limit(1)
+
+    if (!relation) {
+      return jsonError("Student not found or not in your roster.", 404)
+    }
+
+    const [updated] = await db
+      .update(userProfiles)
+      .set({ status: nextStatus, updatedAt: new Date() })
+      .where(and(eq(userProfiles.userId, studentId), eq(userProfiles.role, "student")))
+      .returning({ userId: userProfiles.userId, status: userProfiles.status })
+
+    if (!updated) {
+      return jsonError("Student profile not found.", 404)
+    }
+
+    return Response.json({ ok: true, status: updated.status })
+  } catch (error) {
+    console.error("[api/teacher/students/[studentId] PATCH]", error)
+    return jsonError("Failed to update student status.", 500)
+  }
+}
+
+export async function DELETE(
+  _request: Request,
+  props: { params: Promise<{ studentId: string }> },
+) {
+  const user = await getSessionUser()
+  if (!user || user.role !== "teacher") {
+    return jsonError("Teacher access required.", 403)
+  }
+
+  const { studentId } = await props.params
+  if (!studentId) {
+    return jsonError("Student ID is required.", 400)
+  }
+
+  try {
+    const [relation] = await db
+      .select()
+      .from(teacherStudents)
+      .where(and(eq(teacherStudents.teacherUserId, user.id), eq(teacherStudents.studentUserId, studentId)))
+      .limit(1)
+
+    if (!relation) {
+      return jsonError("Student not found or not in your roster.", 404)
+    }
+
+    const [profile] = await db
+      .select({ email: userProfiles.email, role: userProfiles.role })
+      .from(userProfiles)
+      .where(eq(userProfiles.userId, studentId))
+      .limit(1)
+
+    if (profile?.role === "teacher") {
+      return jsonError("Teacher accounts cannot be deleted here.", 400)
+    }
+
+    await db.transaction(async (tx) => {
+      await tx
+        .delete(teacherStudents)
+        .where(and(eq(teacherStudents.teacherUserId, user.id), eq(teacherStudents.studentUserId, studentId)))
+
+      if (profile?.email) {
+        await tx
+          .update(studentInvitations)
+          .set({ status: "revoked", acceptedByUserId: null, acceptedAt: null })
+          .where(
+            and(
+              eq(studentInvitations.teacherUserId, user.id),
+              eq(studentInvitations.email, profile.email.toLowerCase()),
+            ),
+          )
+      }
+
+      const remainingLinks = await tx
+        .select({ studentUserId: teacherStudents.studentUserId })
+        .from(teacherStudents)
+        .where(eq(teacherStudents.studentUserId, studentId))
+        .limit(1)
+
+      if (remainingLinks.length === 0) {
+        await tx.delete(speakingSessions).where(eq(speakingSessions.userId, studentId))
+        await tx.delete(practiceAttempts).where(eq(practiceAttempts.userId, studentId))
+        await tx.delete(practiceRounds).where(eq(practiceRounds.userId, studentId))
+        await tx.delete(userProfiles).where(eq(userProfiles.userId, studentId))
+      }
+    })
+
+    return Response.json({ ok: true, email: profile?.email ?? null })
+  } catch (error) {
+    console.error("[api/teacher/students/[studentId] DELETE]", error)
+    return jsonError("Failed to delete student.", 500)
   }
 }

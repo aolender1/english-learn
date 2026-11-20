@@ -19,6 +19,8 @@ import {
   Mail,
   Mic,
   MoveRight,
+  PauseCircle,
+  PlayCircle,
   Plus,
   RotateCcw,
   Search,
@@ -50,6 +52,7 @@ type Student = {
   userId: string
   email: string
   name: string | null
+  status?: "active" | "paused"
   joined: string
   sessions: number
   totalAnswers: number
@@ -491,6 +494,93 @@ export function TeacherDashboard({ teacherEmail }: { teacherEmail: string }) {
     }
   }
 
+  async function reinvite(email: string) {
+    setBusy(true)
+    setMessage(null)
+    try {
+      const response = await fetch("/api/teacher/invite", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ email }),
+      })
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) {
+        setMessage({ text: data.error ?? "Could not re-invite student.", error: true })
+        return
+      }
+      setMessage({ text: `${email} re-invited (status: pending).` })
+      await refreshStudentsAndInvites()
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function toggleStudentStatus(student: Pick<Student, "userId" | "email" | "name" | "status">) {
+    const currentStatus = student.status === "paused" ? "paused" : "active"
+    const nextStatus = currentStatus === "paused" ? "active" : "paused"
+    setBusy(true)
+    setMessage(null)
+    try {
+      const res = await fetch(`/api/teacher/students/${student.userId}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ status: nextStatus }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setMessage({ text: data.error ?? "Failed to update student status.", error: true })
+        return
+      }
+      setStudents((prev) =>
+        prev.map((s) => (s.userId === student.userId ? { ...s, status: nextStatus } : s)),
+      )
+      setStudentDetail((prev) =>
+        prev && prev.student.userId === student.userId
+          ? { ...prev, student: { ...prev.student, status: nextStatus } }
+          : prev,
+      )
+      setMessage({
+        text:
+          nextStatus === "paused"
+            ? `${student.name || student.email} was paused (AI features disabled).`
+            : `${student.name || student.email} was reactivated.`,
+      })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function deleteStudent(student: Pick<Student, "userId" | "email" | "name">) {
+    const label = student.name || student.email
+    if (
+      !window.confirm(
+        `Remove student ${label} (${student.email})?\n\nThis deletes their student profile, practice history from your roster, and revokes their invitation.`,
+      )
+    ) {
+      return
+    }
+    setBusy(true)
+    setMessage(null)
+    try {
+      const res = await fetch(`/api/teacher/students/${student.userId}`, {
+        method: "DELETE",
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setMessage({ text: data.error ?? "Failed to remove student.", error: true })
+        return
+      }
+      if (selectedStudentId === student.userId) {
+        setSelectedStudentId(null)
+        setStudentDetail(null)
+      }
+      setMessage({ text: `Student ${student.email} removed from roster.` })
+      await refreshStudentsAndInvites()
+    } finally {
+      setBusy(false)
+    }
+  }
+
   // Topic actions
   async function saveTopic(e: React.FormEvent) {
     e.preventDefault()
@@ -849,9 +939,46 @@ export function TeacherDashboard({ teacherEmail }: { teacherEmail: string }) {
               </div>
 
               <div className="border border-border bg-card p-6 flex flex-col md:flex-row md:items-center justify-between gap-6">
-                <div>
-                  <h2 className="text-2xl font-serif font-semibold">{studentDetail.student.name || studentDetail.student.email}</h2>
+                <div className="flex flex-col gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h2 className="text-2xl font-serif font-semibold">{studentDetail.student.name || studentDetail.student.email}</h2>
+                    {studentDetail.student.status === "paused" ? (
+                      <span className="tag font-mono text-[10px] border-amber-500/50 text-amber-800 bg-amber-50">
+                        Paused
+                      </span>
+                    ) : (
+                      <span className="tag font-mono text-[10px] text-primary border-primary/40">
+                        Active
+                      </span>
+                    )}
+                  </div>
                   <p className="text-sm text-muted-foreground">{studentDetail.student.email}</p>
+                  <div className="flex flex-wrap items-center gap-2 pt-1">
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => void toggleStudentStatus(studentDetail.student)}
+                      className="button-secondary py-1.5 px-3 text-xs min-h-8"
+                    >
+                      {studentDetail.student.status === "paused" ? (
+                        <>
+                          <PlayCircle size={14} className="text-primary" /> Resume student
+                        </>
+                      ) : (
+                        <>
+                          <PauseCircle size={14} className="text-amber-700" /> Pause student
+                        </>
+                      )}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => void deleteStudent(studentDetail.student)}
+                      className="button-secondary py-1.5 px-3 text-xs min-h-8 text-destructive border-destructive/30 hover:bg-destructive/10"
+                    >
+                      <Trash2 size={14} /> Remove student
+                    </button>
+                  </div>
                 </div>
                 <div className="grid grid-cols-3 gap-4 border-t md:border-t-0 md:border-l border-border pt-4 md:pt-0 md:pl-6">
                   <div>
@@ -1119,7 +1246,14 @@ export function TeacherDashboard({ teacherEmail }: { teacherEmail: string }) {
                                   <UserRound size={16} />
                                 </span>
                                 <div className="flex flex-col">
-                                  <span className="font-medium text-foreground">{student.name || student.email.split("@")[0]}</span>
+                                  <div className="flex items-center gap-2">
+                                    <span className="font-medium text-foreground">{student.name || student.email.split("@")[0]}</span>
+                                    {student.status === "paused" && (
+                                      <span className="tag text-[10px] font-mono border-amber-500/50 text-amber-800 bg-amber-50 py-0.5 px-1.5">
+                                        Paused
+                                      </span>
+                                    )}
+                                  </div>
                                   <span className="text-xs text-muted-foreground">{student.email}</span>
                                 </div>
                               </div>
@@ -1133,12 +1267,38 @@ export function TeacherDashboard({ teacherEmail }: { teacherEmail: string }) {
                             </td>
                             <td className="px-5 py-4 text-xs text-muted-foreground">{formatDate(student.lastActivity)}</td>
                             <td className="px-5 py-4 text-right">
-                              <button
-                                onClick={() => inspectStudent(student.userId)}
-                                className="button-secondary text-xs py-1 px-3"
-                              >
-                                View Details <ChevronRight size={14} />
-                              </button>
+                              <div className="flex items-center justify-end gap-1.5">
+                                <button
+                                  type="button"
+                                  disabled={busy}
+                                  onClick={() => void toggleStudentStatus(student)}
+                                  className="icon-button size-8"
+                                  title={student.status === "paused" ? "Resume student" : "Pause student"}
+                                  aria-label={student.status === "paused" ? "Resume student" : "Pause student"}
+                                >
+                                  {student.status === "paused" ? (
+                                    <PlayCircle size={15} className="text-primary" />
+                                  ) : (
+                                    <PauseCircle size={15} className="text-amber-700" />
+                                  )}
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={busy}
+                                  onClick={() => void deleteStudent(student)}
+                                  className="icon-button size-8 text-destructive hover:bg-destructive/10"
+                                  title="Remove student"
+                                  aria-label="Remove student"
+                                >
+                                  <Trash2 size={14} />
+                                </button>
+                                <button
+                                  onClick={() => inspectStudent(student.userId)}
+                                  className="button-secondary text-xs py-1 px-3 min-h-8"
+                                >
+                                  View Details <ChevronRight size={14} />
+                                </button>
+                              </div>
                             </td>
                           </tr>
                         )
@@ -2277,6 +2437,16 @@ export function TeacherDashboard({ teacherEmail }: { teacherEmail: string }) {
                           aria-label={`Revoke invitation for ${invitation.email}`}
                         >
                           <X size={15} aria-hidden="true" />
+                        </button>
+                      )}
+                      {invitation.status === "revoked" && (
+                        <button
+                          type="button"
+                          onClick={() => void reinvite(invitation.email)}
+                          disabled={busy}
+                          className="button-secondary py-1 px-3 text-xs min-h-8"
+                        >
+                          <RotateCcw size={13} aria-hidden="true" /> Re-invite
                         </button>
                       )}
                     </div>

@@ -41,5 +41,14 @@ export async function requireAuthorizedAiUser(): Promise<
       ),
     }
   }
+  if (user.role === "student" && user.status === "paused") {
+    return {
+      user: null,
+      errorResponse: jsonError(
+        "Tu cuenta fue pausada por tu profesor. Pedile que la reactive para usar las funciones de IA.",
+        403,
+      ),
+    }
+  }
   return { user, errorResponse: null }
 }

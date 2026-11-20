@@ -19,11 +19,13 @@ export const TEACHER_EMAILS: ReadonlySet<string> = new Set(
 )
 
 export type AppRole = "teacher" | "student"
+export type AccountStatus = "active" | "paused"
 export type AppUser = {
   id: string
   email: string
   name: string | null
   role: AppRole
+  status: AccountStatus
   onboardingComplete: boolean
 }
 
@@ -40,6 +42,7 @@ function toAppUser(row: typeof userProfiles.$inferSelect): AppUser {
     email: row.email,
     name: row.name,
     role: row.role as AppRole,
+    status: row.status === "paused" ? "paused" : "active",
     onboardingComplete: row.onboardingComplete,
   }
 }

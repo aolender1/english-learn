@@ -26,6 +26,7 @@ export async function GET() {
       userId: userProfiles.userId,
       email: userProfiles.email,
       name: userProfiles.name,
+      status: userProfiles.status,
       joined: teacherStudents.createdAt,
     })
     .from(teacherStudents)
